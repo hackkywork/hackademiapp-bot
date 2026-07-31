@@ -52,7 +52,12 @@ def generate_and_send_backup(chat_id_target, is_automatic=False):
         )
         return True
     except Exception as e:
-        print(f"Помилка створення бекапу: {e}")
+        error_msg = f"Помилка створення бекапу: {str(e)}"
+        print(error_msg)
+        try:
+            bot.send_message(ADMIN_ID, f"❌ Технічна помилка бекапу:\n`{str(e)}`", parse_mode="Markdown")
+        except:
+            pass
         return False
 
 # Функція, яку викликатиме планувальник щодня
