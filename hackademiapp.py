@@ -1,5 +1,6 @@
 import os
 import telebot
+from keep_alive import keep_alive
 from telebot import types
 import json
 from datetime import datetime
@@ -134,6 +135,8 @@ def handle_logs_and_backups(message):
             print("Помилка пересилання:", e)
 
 if __name__ == '__main__':
+    keep_alive()  # <--- ЦЕЙ РЯДОК ОБОВ'ЯЗКОВИЙ! Він запускає сервер
+    
     print("Бот запущено і слухає події (планувальник активний)...")
     try:
         bot.infinity_polling()
