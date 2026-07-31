@@ -14,7 +14,7 @@ ADMIN_ID = 597686904  # Твій Telegram ID
 LOG_CHANNEL_ID = -1001240560482  # Кеш-канал
 
 # Налаштування Supabase
-SUPABASE_URL = "https://vysoirkwthldlidayhfy.supabase.co/rest/v1"
+SUPABASE_URL = "https://vysoirkwthldlidayhfy.supabase.co"
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
