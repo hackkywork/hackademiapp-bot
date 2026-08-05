@@ -149,6 +149,7 @@ def handle_access_decision(call):
         supabase.table('users').update({'access_status': 'approved'}).eq('telegram_id', target_user_id).execute()
         bot.edit_message_text(f"{call.message.text}\n\n✅ **СХВАЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id)
         
+        # Сповіщаємо учня про успіх і даємо кнопку входу
         try:
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
@@ -160,6 +161,7 @@ def handle_access_decision(call):
         supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
         bot.edit_message_text(f"{call.message.text}\n\n❌ **ВІДХИЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id)
         
+        # Сповіщаємо учня про відмову
         try:
             bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
         except:
