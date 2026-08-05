@@ -143,7 +143,7 @@ def send_welcome(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
 def handle_access_decision(call):
     try:
-        # ОБОВ'ЯЗКОВО: кажемо Телеграму, що кнопку натиснуто, щоб вона не зависала
+        # ОБОВ'ЯЗКОВО: миттєво відповідаємо Телеграму, щоб прибрати "крутилку" на кнопці
         bot.answer_callback_query(call.id) 
         
         action, target_user_id = call.data.split('_')
@@ -170,7 +170,10 @@ def handle_access_decision(call):
                 pass
     except Exception as e:
         print("Помилка в обробці кнопки:", e)
-        bot.answer_callback_query(call.id, "Виникла помилка!", show_alert=True)
+        try:
+            bot.answer_callback_query(call.id, "Виникла помилка!", show_alert=True)
+        except:
+            pass
 
 # 2.5 КОМАНДА: /users (Керування доступом)
 @bot.message_handler(commands=['users'])
