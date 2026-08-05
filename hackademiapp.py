@@ -166,6 +166,7 @@ def handle_access_decision(call):
             bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
         except:
             pass
+            
 
 # 3. КОМАНДА: /backup (ручний запуск)
 @bot.message_handler(commands=['backup'])
