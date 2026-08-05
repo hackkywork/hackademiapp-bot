@@ -144,7 +144,7 @@ def send_welcome(message):
 def handle_access_decision(call):
     action, target_user_id = call.data.split('_')
     target_user_id = int(target_user_id)
-    
+
     if action == 'approve':
         supabase.table('users').update({'access_status': 'approved'}).eq('telegram_id', target_user_id).execute()
         bot.edit_message_text(f"{call.message.text}\n\n✅ **СХВАЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id)
