@@ -10,7 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # Налаштування Telegram
 TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = 597686904  # Твій Telegram ID
+ADMIN_ID = 5604755902  # Твій Telegram ID
 LOG_CHANNEL_ID = -1001240560482  # Кеш-канал
 
 # Налаштування Supabase
