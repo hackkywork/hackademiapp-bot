@@ -202,7 +202,7 @@ def manage_users(message):
         parse_mode="Markdown"
     )
 
-# Обробка кнопки "Забрати доступ"
+# 2.6 Обробка кнопки "Забрати доступ"
 @bot.callback_query_handler(func=lambda call: call.data.startswith('revoke_'))
 def handle_revoke(call):
     try:
