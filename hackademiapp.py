@@ -77,30 +77,93 @@ try:
 except Exception as e:
     print("Не вдалося надіслати сповіщення:", e)
 
-# 2. Реакція на команду /start
+# 2. Реакція на команду /start та перевірка доступу
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+    
+    # Видаляємо стару клавіатуру, якщо була
     remove_markup = types.ReplyKeyboardRemove()
-    temp_msg = bot.send_message(message.chat.id, "🔄 Оновлюю меню...", reply_markup=remove_markup)
+    temp_msg = bot.send_message(message.chat.id, "🔄 Перевіряю доступ...", reply_markup=remove_markup)
     bot.delete_message(message.chat.id, temp_msg.message_id)
 
-    markup = types.InlineKeyboardMarkup(row_width=1)
+    # Шукаємо юзера в Supabase
+    response = supabase.table('users').select('*').eq('telegram_id', user_id).execute()
     
-    web_app_btn = types.InlineKeyboardButton(
-        "🚀 Відкрити платформу", 
-        web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app") 
-    )
-    
-    markup.add(web_app_btn)
+    if not response.data:
+        # Новий юзер -> записуємо як pending
+        supabase.table('users').insert({
+            'telegram_id': user_id, 
+            'first_name': first_name,
+            'access_status': 'pending'
+        }).execute()
+        status = 'pending'
+    else:
+        status = response.data[0].get('access_status', 'pending')
+        
+    # Якщо це адмін або схвалений учень
+    if user_id == ADMIN_ID or status == 'approved':
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        web_app_btn = types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app"))
+        markup.add(web_app_btn)
 
-    bot.send_message(
-        message.chat.id, 
-        "Привіт! 👋 Я бот платформи **Hackademia** 🎓\n\n"
-        "Тут ви можете керувати курсами, створювати тижні та додавати завдання для студентів.\n\n"
-        "👇 Тисніть кнопку нижче, щоб розпочати роботу:",
-        reply_markup=markup,
-        parse_mode="Markdown"
-    )
+        bot.send_message(
+            message.chat.id, 
+            f"Привіт, {first_name}! 👋 Я бот платформи **Hackademia** 🎓\n\n👇 Тисніть кнопку нижче, щоб розпочати роботу:",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+    elif status == 'rejected':
+        bot.send_message(message.chat.id, "❌ Доступ до платформи закрито адміністратором.")
+    else:
+        # Статус 'pending'
+        bot.send_message(message.chat.id, "⏳ Ваш запит на доступ надіслано головному адміністратору. Очікуйте підтвердження!")
+        
+        # Відправляємо запит адміну
+        admin_markup = types.InlineKeyboardMarkup(row_width=2)
+        btn_approve = types.InlineKeyboardButton("✅ Схвалити", callback_data=f"approve_{user_id}")
+        btn_reject = types.InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user_id}")
+        admin_markup.add(btn_approve, btn_reject)
+        
+        mention = f"@{username}" if username else f"[{first_name}](tg://user?id={user_id})"
+        
+        bot.send_message(
+            ADMIN_ID,
+            f"🔔 **Новий запит на доступ!**\n\n"
+            f"👤 Користувач: {mention}\n"
+            f"🆔 ID: `{user_id}`\n\n"
+            f"Надати доступ?",
+            reply_markup=admin_markup,
+            parse_mode="Markdown"
+        )
+
+# 2.1 Обробка кнопок адміна (Схвалити/Відхилити)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
+def handle_access_decision(call):
+    action, target_user_id = call.data.split('_')
+    target_user_id = int(target_user_id)
+    
+    if action == 'approve':
+        supabase.table('users').update({'access_status': 'approved'}).eq('telegram_id', target_user_id).execute()
+        bot.edit_message_text(f"{call.message.text}\n\n✅ **СХВАЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id)
+        
+        try:
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
+            bot.send_message(target_user_id, "🎉 **Вашу заявку схвалено!**\n\nТепер ви маєте повний доступ до платформи.", reply_markup=markup, parse_mode="Markdown")
+        except:
+            pass
+            
+    elif action == 'reject':
+        supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
+        bot.edit_message_text(f"{call.message.text}\n\n❌ **ВІДХИЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id)
+        
+        try:
+            bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
+        except:
+            pass
 
 # 3. КОМАНДА: /backup (ручний запуск)
 @bot.message_handler(commands=['backup'])
