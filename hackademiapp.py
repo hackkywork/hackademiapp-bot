@@ -10,8 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # Налаштування Telegram
 TOKEN = os.getenv('BOT_TOKEN')
-# ТУТ СПИСОК: Обидва твої акаунти мають права адміністратора!
-ADMIN_IDS = [597686904, 5604755902]  
+ADMIN_IDS = [597686904, 5604755902]  # ТУТ СПИСОК: Обидва твої акаунти мають права!
 LOG_CHANNEL_ID = -1001240560482  # Кеш-канал
 
 # Налаштування Supabase
@@ -55,7 +54,6 @@ def generate_and_send_backup(chat_id_target, is_automatic=False):
     except Exception as e:
         error_msg = f"Помилка створення бекапу: {str(e)}"
         print(error_msg)
-        # Сповіщаємо всіх адмінів про помилку
         for admin_id in ADMIN_IDS:
             try:
                 bot.send_message(admin_id, f"❌ Технічна помилка бекапу:\n`{str(e)}`", parse_mode="Markdown")
@@ -74,11 +72,11 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(scheduled_backup_job, 'cron', hour=3, minute=0)
 scheduler.start()
 
-# 1. Сповіщення про запуск (всім адмінам)
+# 1. Сповіщення про запуск
 for admin_id in ADMIN_IDS:
     try:
-        bot.send_message(admin_id, "🚀 Бот успішно запущено з активним автобекапером (щодня о 03:00)!")
-    except Exception as e:
+        bot.send_message(admin_id, "🚀 Бот успішно запущено з оновленою системою фейсконтролю!")
+    except:
         pass
 
 # 2. Реакція на команду /start та перевірка доступу
@@ -107,7 +105,7 @@ def send_welcome(message):
     else:
         status = response.data[0].get('access_status', 'pending')
         
-    # Якщо це адмін (хтось із двох) або схвалений учень
+    # Якщо це адмін (один із списку) або схвалений учень
     if user_id in ADMIN_IDS or status == 'approved':
         markup = types.InlineKeyboardMarkup(row_width=1)
         web_app_btn = types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app"))
@@ -133,7 +131,6 @@ def send_welcome(message):
         
         mention = f"@{username}" if username else f"[{first_name}](tg://user?id={user_id})"
         
-        # Розсилаємо сповіщення ВСІМ адмінам зі списку
         for admin_id in ADMIN_IDS:
             try:
                 bot.send_message(
@@ -152,40 +149,60 @@ def send_welcome(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
 def handle_access_decision(call):
     try:
-        # ОБОВ'ЯЗКОВО: миттєво відповідаємо Телеграму, щоб прибрати "крутилку" на кнопці
-        bot.answer_callback_query(call.id) 
-        
-        # Перевірка: чи має право людина тиснути на цю кнопку
         if call.from_user.id not in ADMIN_IDS:
             bot.answer_callback_query(call.id, "❌ У вас немає прав!", show_alert=True)
             return
 
+        # Кажемо Телеграму прибрати "годинничок" завантаження
+        bot.answer_callback_query(call.id, "Оновлюю базу...") 
+        
         action, target_user_id = call.data.split('_')
         target_user_id = int(target_user_id)
 
         if action == 'approve':
+            # Оновлюємо БД
             supabase.table('users').update({'access_status': 'approved'}).eq('telegram_id', target_user_id).execute()
-            bot.edit_message_text(f"{call.message.text}\n\n✅ **СХВАЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id)
             
+            # Змінюємо повідомлення в адміна (кнопки зникають)
+            bot.edit_message_text(
+                text=f"🔔 Запит від ID `{target_user_id}`\n\n✅ Рішення: **СХВАЛЕНО**", 
+                chat_id=call.message.chat.id, 
+                message_id=call.message.message_id,
+                parse_mode="Markdown",
+                reply_markup=None
+            )
+            
+            # Пишемо учню
             try:
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
                 bot.send_message(target_user_id, "🎉 **Вашу заявку схвалено!**\n\nТепер ви маєте повний доступ до платформи.", reply_markup=markup, parse_mode="Markdown")
-            except Exception as e:
-                print("Не вдалося надіслати повідомлення учню:", e)
+            except:
+                pass
                 
         elif action == 'reject':
+            # Оновлюємо БД
             supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
-            bot.edit_message_text(f"{call.message.text}\n\n❌ **ВІДХИЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id)
             
+            # Змінюємо повідомлення в адміна (кнопки зникають)
+            bot.edit_message_text(
+                text=f"🔔 Запит від ID `{target_user_id}`\n\n❌ Рішення: **ВІДХИЛЕНО**", 
+                chat_id=call.message.chat.id, 
+                message_id=call.message.message_id,
+                parse_mode="Markdown",
+                reply_markup=None
+            )
+            
+            # Пишемо учню
             try:
                 bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
             except:
                 pass
+
     except Exception as e:
-        print("Помилка в обробці кнопки:", e)
+        print(f"CRITICAL ERROR in handle_access_decision: {e}")
         try:
-            bot.answer_callback_query(call.id, "Виникла помилка!", show_alert=True)
+            bot.answer_callback_query(call.id, "Виникла системна помилка!", show_alert=True)
         except:
             pass
 
@@ -207,7 +224,7 @@ def manage_users(message):
     for u in approved_users:
         name = u.get('first_name', 'Unknown')
         uid = u.get('telegram_id')
-        # Не виводимо тебе самого в список на видалення
+        # Не виводимо адмінів в список на видалення
         if uid not in ADMIN_IDS:
             btn = types.InlineKeyboardButton(f"❌ Забрати доступ: {name}", callback_data=f"revoke_{uid}")
             markup.add(btn)
@@ -223,17 +240,17 @@ def manage_users(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('revoke_'))
 def handle_revoke(call):
     try:
-        bot.answer_callback_query(call.id)
         if call.from_user.id not in ADMIN_IDS:
+            bot.answer_callback_query(call.id, "❌ У вас немає прав!", show_alert=True)
             return
 
+        bot.answer_callback_query(call.id, "Видаляю доступ...")
         target_id = int(call.data.split('_')[1])
         
         # Забираємо доступ у базі
         supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_id).execute()
-        bot.answer_callback_query(call.id, "✅ Доступ успішно скасовано!", show_alert=True)
         
-        # Перемальовуємо клавіатуру, щоб ця кнопка зникла зі списку
+        # Видаляємо саме цю кнопку зі списку
         markup = call.message.reply_markup
         new_keyboard = [row for row in markup.keyboard if row[0].callback_data != call.data]
         new_markup = types.InlineKeyboardMarkup()
@@ -249,7 +266,7 @@ def handle_revoke(call):
             pass
             
     except Exception as e:
-        print("Помилка видалення доступу:", e)
+        print(f"CRITICAL ERROR in handle_revoke: {e}")
         try:
             bot.answer_callback_query(call.id, "Помилка бази даних", show_alert=True)
         except:
@@ -292,7 +309,7 @@ def handle_logs_and_backups(message):
         except Exception as e:
             print("Помилка пересилання:", e)
 
-# 6. Заглушка для старих/невідомих кнопок
+# 6. Заглушка для старих/завислих кнопок
 @bot.callback_query_handler(func=lambda call: True)
 def catch_all_callbacks(call):
     try:
@@ -305,7 +322,6 @@ if __name__ == '__main__':
     
     print("Бот запущено і слухає події (планувальник активний)...")
     try:
-        # Додано timeout, щоб уникнути конфліктів на Render
-        bot.infinity_polling(timeout=20, long_polling_timeout=15)
+        bot.infinity_polling(timeout=10, long_polling_timeout=5)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
