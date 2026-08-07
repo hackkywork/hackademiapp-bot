@@ -130,15 +130,25 @@ def send_welcome(message):
     else:
         bot.send_message(message.chat.id, "⏳ Ваш запит на доступ надіслано головному адміністратору. Очікуйте підтвердження!")
         
-        admin_markup = types.InlineKeyboardMarkup(row_width=2)
-        admin_markup.add(
-            types.InlineKeyboardButton("✅ Схвалити", callback_data=f"approve_{user_id}"),
-            types.InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user_id}")
+        # Витягуємо максимум інформації про користувача
+        last_name = message.from_user.last_name or ""
+        full_name = f"{first_name} {last_name}".strip()
+        mention = f"@{username}" if username else "Не вказано (приховано)"
+        lang = message.from_user.language_code or "Невідомо"
+        
+        notification_text = (
+            f"🔔 **Нова заявка на доступ!**\n\n"
+            f"👤 **Ім'я:** {full_name}\n"
+            f"🔗 **Юзернейм:** {mention}\n"
+            f"🆔 **ID:** `{user_id}`\n"
+            f"🌐 **Мова пристрою:** {lang}\n\n"
+            f"👉 Зайдіть на сайт платформи (натисніть на 🔔 вгорі), щоб керувати доступом."
         )
-        mention = f"@{username}" if username else f"[{first_name}](tg://user?id={user_id})"
+        
+        # Відправляємо сповіщення всім адмінам
         for admin_id in ADMIN_IDS:
             try:
-                bot.send_message(admin_id, f"🔔 **Новий запит на доступ!**\n\n👤 Користувач: {mention}\n🆔 ID: `{user_id}`\n\nНадати доступ?", reply_markup=admin_markup, parse_mode="Markdown")
+                bot.send_message(admin_id, notification_text, parse_mode="Markdown")
             except:
                 pass
 
