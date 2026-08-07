@@ -190,16 +190,19 @@ def verify_sub_callback(call):
     
     # 1. ТИХО перевіряємо умову
     if not check_user_subscription(user_id):
-        # Відповідаємо помилкою
+        # Відповідаємо помилкою та перериваємо виконання (return)
         bot.answer_callback_query(call.id, "❌ Ви ще не підписалися на всі канали!", show_alert=True)
         return
 
-    # 2. Відповідаємо успіхом
+    # 2. Відповідаємо успіхом СУВОРО ОДИН РАЗ
     bot.answer_callback_query(call.id, "✅ Підтверджено!")
+    
+    # 3. Виконуємо подальші дії
     try:
         bot.delete_message(call.message.chat.id, call.message.message_id)
-    except:
+    except Exception:
         pass
+        
     process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
 
 # Обробник кнопки "Надіслати запит повторно"
@@ -213,9 +216,11 @@ def handle_reapply(call):
         send_subscription_prompt(call.message.chat.id)
         return
 
-    # 2. Якщо підписка є, продовжуємо
+    # 2. Якщо підписка є, продовжуємо оновлення в базі
     try:
         supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
+        
+        # Відповідаємо колбеку ОДИН РАЗ про успіх
         bot.answer_callback_query(call.id, "✅ Запит успішно надіслано!")
         
         bot.edit_message_text(
@@ -241,10 +246,12 @@ def handle_reapply(call):
         for admin_id in ADMIN_IDS:
             try: 
                 bot.send_message(admin_id, notification_text, parse_mode="Markdown")
-            except: 
+            except Exception: 
                 pass
+                
     except Exception as e:
-        bot.answer_callback_query(call.id, f"Помилка: {e}", show_alert=True)
+        # У разі помилки бази даних — відповідаємо колбеку помилкою
+        bot.answer_callback_query(call.id, f"❌ Помилка: {e}", show_alert=True)
 
 @bot.message_handler(commands=['add'])
 def manual_add_user(message):
@@ -310,23 +317,32 @@ def handle_access_decision(call):
 
         if action == 'approve':
             supabase.table('users').update({'access_status': 'approved'}).eq('telegram_id', target_user_id).execute()
+            
+            # Відповідаємо успіхом
             bot.answer_callback_query(call.id, "✅ Схвалено!")
+            
             bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n✅ Рішення: **СХВАЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
             try:
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
                 bot.send_message(target_user_id, "🎉 **Вашу заявку схвалено!**\n\nТепер ви маєте повний доступ до платформи.", reply_markup=markup, parse_mode="Markdown")
-            except: pass
+            except Exception: 
+                pass
                 
         elif action == 'reject':
             supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
+            
+            # Відповідаємо відмовою
             bot.answer_callback_query(call.id, "❌ Відхилено!")
+            
             bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n❌ Рішення: **ВІДХИЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
             try: 
                 bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
-            except: pass
+            except Exception: 
+                pass
+                
     except Exception as e:
-        bot.answer_callback_query(call.id, f"Помилка: {e}", show_alert=True)
+        bot.answer_callback_query(call.id, f"❌ Помилка: {e}", show_alert=True)
 
 @bot.message_handler(commands=['users'])
 def manage_users(message):
