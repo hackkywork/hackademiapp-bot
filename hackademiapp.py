@@ -12,7 +12,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # Налаштування Telegram
 TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_IDS = [597686904, 5604755902]  # Обидва акаунти є адмінами!
+ADMIN_IDS = [597686904, 5604755902]  # Адміни
 LOG_CHANNEL_ID = -1001240560482  # Кеш-канал
 
 # Обов'язкові канали для підписки
@@ -90,7 +90,7 @@ scheduler.start()
 
 for admin_id in ADMIN_IDS:
     try:
-        bot.send_message(admin_id, "🚀 Бот успішно запущено! Увімкнено email-сповіщення та перевірку підписок.")
+        bot.send_message(admin_id, "🚀 Бот успішно запущено! Увімкнено перевірку підписок та повторні заявки.")
     except:
         pass
 
@@ -198,6 +198,7 @@ def send_welcome(message):
 # Обробник кнопки "Я підписався"
 @bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
 def verify_sub_callback(call):
+    bot.answer_callback_query(call.id, "Перевіряю підписку...")
     user_id = call.from_user.id
     
     if user_id in ADMIN_IDS:
@@ -225,6 +226,7 @@ def verify_sub_callback(call):
 # Обробник кнопки "Надіслати запит повторно"
 @bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
 def handle_reapply(call):
+    bot.answer_callback_query(call.id, "Надсилаємо запит...")
     user_id = call.from_user.id
     try:
         supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
@@ -254,7 +256,7 @@ def handle_reapply(call):
             except: 
                 pass
     except Exception as e:
-        bot.answer_callback_query(call.id, f"Помилка: {e}")
+        bot.answer_callback_query(call.id, f"Помилка: {e}", show_alert=True)
 
 @bot.message_handler(commands=['add'])
 def manual_add_user(message):
