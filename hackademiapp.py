@@ -188,30 +188,36 @@ def send_welcome(message):
 def verify_sub_callback(call):
     user_id = call.from_user.id
     
-    if check_user_subscription(user_id):
-        bot.answer_callback_query(call.id, "✅ Підтверджено!")
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
-        process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
-    else:
+    # 1. ТИХО перевіряємо умову
+    if not check_user_subscription(user_id):
+        # Відповідаємо помилкою
         bot.answer_callback_query(call.id, "❌ Ви ще не підписалися на всі канали!", show_alert=True)
+        return
+
+    # 2. Відповідаємо успіхом
+    bot.answer_callback_query(call.id, "✅ Підтверджено!")
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+    process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
 
 # Обробник кнопки "Надіслати запит повторно"
 @bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
 def handle_reapply(call):
     user_id = call.from_user.id
     
-    # Спочатку перевіряємо підписку без зайвих відповідей на колбек
+    # 1. ТИХО перевіряємо підписку перед дією
     if not check_user_subscription(user_id):
         bot.answer_callback_query(call.id, "❌ Підпишіться на канали перед подачею запиту!", show_alert=True)
         send_subscription_prompt(call.message.chat.id)
         return
 
-    bot.answer_callback_query(call.id, "⏳ Надсилаємо запит...")
+    # 2. Якщо підписка є, продовжуємо
     try:
         supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
+        bot.answer_callback_query(call.id, "✅ Запит успішно надіслано!")
+        
         bot.edit_message_text(
             "⏳ Ваш повторний запит надіслано адміністратору! Очікуйте підтвердження.", 
             chat_id=call.message.chat.id, 
@@ -294,17 +300,17 @@ def handle_forwarded_message(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
 def handle_access_decision(call):
-    try:
-        bot.answer_callback_query(call.id, "Обробляю...") 
-        if call.from_user.id not in ADMIN_IDS:
-            bot.answer_callback_query(call.id, "❌ У вас немає прав!", show_alert=True)
-            return
+    if call.from_user.id not in ADMIN_IDS:
+        bot.answer_callback_query(call.id, "❌ У вас немає прав!", show_alert=True)
+        return
         
+    try:
         action, target_user_id = call.data.split('_')
         target_user_id = int(target_user_id)
 
         if action == 'approve':
             supabase.table('users').update({'access_status': 'approved'}).eq('telegram_id', target_user_id).execute()
+            bot.answer_callback_query(call.id, "✅ Схвалено!")
             bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n✅ Рішення: **СХВАЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
             try:
                 markup = types.InlineKeyboardMarkup()
@@ -314,12 +320,13 @@ def handle_access_decision(call):
                 
         elif action == 'reject':
             supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
+            bot.answer_callback_query(call.id, "❌ Відхилено!")
             bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n❌ Рішення: **ВІДХИЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
             try: 
                 bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
             except: pass
     except Exception as e:
-        print(f"CRITICAL ERROR: {e}")
+        bot.answer_callback_query(call.id, f"Помилка: {e}", show_alert=True)
 
 @bot.message_handler(commands=['users'])
 def manage_users(message):
@@ -340,12 +347,14 @@ def manage_users(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('revoke_'))
 def handle_revoke(call):
+    if call.from_user.id not in ADMIN_IDS:
+        bot.answer_callback_query(call.id, "❌ Немає прав!", show_alert=True)
+        return
+        
     try:
-        if call.from_user.id not in ADMIN_IDS:
-            return
-        bot.answer_callback_query(call.id, "Видаляю доступ...")
         target_id = int(call.data.split('_')[1])
         supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_id).execute()
+        bot.answer_callback_query(call.id, "✅ Доступ успішно скасовано!")
         
         markup = call.message.reply_markup
         new_keyboard = [row for row in markup.keyboard if row[0].callback_data != call.data]
@@ -356,7 +365,7 @@ def handle_revoke(call):
         bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=new_markup)
         bot.send_message(target_id, "❌ Адміністратор скасував ваш доступ до платформи.")
     except Exception as e:
-        print(f"Помилка видалення: {e}")
+        bot.answer_callback_query(call.id, f"Помилка: {e}", show_alert=True)
 
 @bot.message_handler(commands=['backup'])
 def handle_database_backup(message):
