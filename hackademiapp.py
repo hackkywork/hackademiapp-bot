@@ -15,6 +15,9 @@ TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_IDS = [597686904, 5604755902]  # Обидва акаунти є адмінами!
 LOG_CHANNEL_ID = -1001240560482  # Кеш-канал
 
+# Обов'язкові канали для підписки
+REQUIRED_CHANNELS = ["@hackslovak", "@hackslovak_blog"]
+
 # Налаштування Пошти
 GMAIL_ACCOUNT = "hackslovak@gmail.com"
 GMAIL_PASSWORD = os.getenv('GMAIL_PASSWORD')  # Пароль додатка з налаштувань Google
@@ -87,18 +90,13 @@ scheduler.start()
 
 for admin_id in ADMIN_IDS:
     try:
-        bot.send_message(admin_id, "🚀 Бот успішно запущено! Увімкнено email-сповіщення та керування через репости.")
+        bot.send_message(admin_id, "🚀 Бот успішно запущено! Увімкнено email-сповіщення та перевірку підписок.")
     except:
         pass
 
-# ----------------- БОТ: КОМАНДИ Й ОБРОБНИКИ -----------------
+# ----------------- ЛОГІКА ДОСТУПУ ТА ПІДПИСОК -----------------
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    user_id = message.from_user.id
-    username = message.from_user.username
-    first_name = message.from_user.first_name
-    
+def process_user_access(message, user_id, first_name, username):
     remove_markup = types.ReplyKeyboardRemove()
     temp_msg = bot.send_message(message.chat.id, "🔄 Перевіряю доступ...", reply_markup=remove_markup)
     bot.delete_message(message.chat.id, temp_msg.message_id)
@@ -112,7 +110,6 @@ def send_welcome(message):
                 'access_status': 'pending'
             }).execute()
             status = 'pending'
-            # ВІДПРАВЛЯЄМО ЛИСТ НА ПОШТУ
             send_email_alert(first_name, user_id)
         else:
             status = response.data[0].get('access_status', 'pending')
@@ -125,16 +122,25 @@ def send_welcome(message):
         web_app_btn = types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app"))
         markup.add(web_app_btn)
         bot.send_message(message.chat.id, f"Привіт, {first_name}! 👋 Я бот платформи **Hackademia** 🎓\n\n👇 Тисніть кнопку нижче, щоб розпочати роботу:", reply_markup=markup, parse_mode="Markdown")
+    
     elif status == 'rejected':
-        bot.send_message(message.chat.id, "❌ Доступ до платформи закрито адміністратором.")
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔄 Надіслати запит повторно", callback_data="reapply_access"))
+        bot.send_message(
+            message.chat.id, 
+            "❌ **Ваш доступ до платформи скасовано.**\n\n"
+            "Щоб відновити доступ, придбайте новий курс або лекцію. "
+            "Після оплати натисніть кнопку нижче, щоб надіслати запит адміністратору.", 
+            reply_markup=markup, parse_mode="Markdown"
+        )
+    
     else:
         bot.send_message(message.chat.id, "⏳ Ваш запит на доступ надіслано головному адміністратору. Очікуйте підтвердження!")
         
-        # Витягуємо максимум інформації про користувача
         last_name = message.from_user.last_name or ""
         full_name = f"{first_name} {last_name}".strip()
         mention = f"@{username}" if username else "Не вказано (приховано)"
-        lang = message.from_user.language_code or "Невідомо"
+        lang = getattr(message.from_user, 'language_code', "Невідомо")
         
         notification_text = (
             f"🔔 **Нова заявка на доступ!**\n\n"
@@ -145,12 +151,110 @@ def send_welcome(message):
             f"👉 Зайдіть на сайт платформи (натисніть на 🔔 вгорі), щоб керувати доступом."
         )
         
-        # Відправляємо сповіщення всім адмінам
         for admin_id in ADMIN_IDS:
             try:
                 bot.send_message(admin_id, notification_text, parse_mode="Markdown")
             except:
                 pass
+
+# ----------------- БОТ: КОМАНДИ Й ОБРОБНИКИ -----------------
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name
+
+    # Перевірка обов'язкової підписки на канали (адміни проходять без перевірки)
+    if user_id not in ADMIN_IDS:
+        is_subscribed = True
+        for channel in REQUIRED_CHANNELS:
+            try:
+                stat = bot.get_chat_member(channel, user_id).status
+                if stat in ['left', 'kicked']:
+                    is_subscribed = False
+                    break
+            except Exception as e:
+                print(f"Помилка перевірки підписки (перевірте чи є бот адміном у {channel}): {e}")
+                is_subscribed = False
+                break
+                
+        if not is_subscribed:
+            markup = types.InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                types.InlineKeyboardButton("📢 Канал HackSlovak", url="https://t.me/hackslovak"),
+                types.InlineKeyboardButton("📝 Блог HackSlovak", url="https://t.me/hackslovak_blog"),
+                types.InlineKeyboardButton("✅ Я підписався", callback_data="check_subscription")
+            )
+            bot.send_message(
+                message.chat.id, 
+                "👋 **Привіт!**\n\nЩоб користуватися платформою Hackademia, необхідно бути підписаним на наші канали.\n\nПідпишіться та натисніть кнопку нижче 👇", 
+                reply_markup=markup, parse_mode="Markdown"
+            )
+            return
+
+    process_user_access(message, user_id, first_name, username)
+
+# Обробник кнопки "Я підписався"
+@bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
+def verify_sub_callback(call):
+    user_id = call.from_user.id
+    
+    if user_id in ADMIN_IDS:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
+        return
+
+    is_subscribed = True
+    for channel in REQUIRED_CHANNELS:
+        try:
+            stat = bot.get_chat_member(channel, user_id).status
+            if stat in ['left', 'kicked']:
+                is_subscribed = False
+                break
+        except:
+            is_subscribed = False
+            break
+            
+    if is_subscribed:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
+    else:
+        bot.answer_callback_query(call.id, "❌ Ви ще не підписалися на всі канали!", show_alert=True)
+
+# Обробник кнопки "Надіслати запит повторно"
+@bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
+def handle_reapply(call):
+    user_id = call.from_user.id
+    try:
+        supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
+        bot.edit_message_text(
+            "⏳ Ваш повторний запит надіслано адміністратору! Очікуйте підтвердження.", 
+            chat_id=call.message.chat.id, 
+            message_id=call.message.message_id
+        )
+        
+        last_name = call.from_user.last_name or ""
+        full_name = f"{call.from_user.first_name} {last_name}".strip()
+        username = call.from_user.username
+        mention = f"@{username}" if username else "Не вказано"
+        lang = getattr(call.from_user, 'language_code', "Невідомо")
+        
+        notification_text = (
+            f"🔔 **Повторна заявка на доступ!**\n\n"
+            f"👤 **Ім'я:** {full_name}\n"
+            f"🔗 **Юзернейм:** {mention}\n"
+            f"🆔 **ID:** `{user_id}`\n"
+            f"🌐 **Мова:** {lang}\n\n"
+            f"👉 Зайдіть на сайт платформи, щоб надати доступ."
+        )
+        for admin_id in ADMIN_IDS:
+            try: 
+                bot.send_message(admin_id, notification_text, parse_mode="Markdown")
+            except: 
+                pass
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"Помилка: {e}")
 
 @bot.message_handler(commands=['add'])
 def manual_add_user(message):
@@ -242,7 +346,8 @@ def handle_access_decision(call):
         elif action == 'reject':
             supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
             bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n❌ Рішення: **ВІДХИЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
-            try: bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
+            try: 
+                bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
             except: pass
     except Exception as e:
         print(f"CRITICAL ERROR in handle_access_decision: {e}")
