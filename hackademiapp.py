@@ -20,7 +20,7 @@ REQUIRED_CHANNELS = ["@hackslovak", "@hackslovak_blog"]
 
 # Налаштування Пошти
 GMAIL_ACCOUNT = "hackslovak@gmail.com"
-GMAIL_PASSWORD = os.getenv('GMAIL_PASSWORD')  # Пароль додатка з налаштувань Google
+GMAIL_PASSWORD = os.getenv('GMAIL_PASSWORD')
 
 # Налаштування Supabase
 SUPABASE_URL = "https://vysoirkwthldlidayhfy.supabase.co"
@@ -32,7 +32,6 @@ bot = telebot.TeleBot(TOKEN)
 # ----------------- ФУНКЦІЇ -----------------
 
 def send_email_alert(user_name, user_id):
-    """Відправляє сповіщення на пошту про нову заявку"""
     if not GMAIL_PASSWORD:
         return
     try:
@@ -73,34 +72,47 @@ def generate_and_send_backup(chat_id_target, is_automatic=False):
         bot.send_document(chat_id_target, file_stream, caption=caption, parse_mode="Markdown")
         return True
     except Exception as e:
-        for admin_id in ADMIN_IDS:
-            try:
-                bot.send_message(admin_id, f"❌ Технічна помилка бекапу:\n`{str(e)}`", parse_mode="Markdown")
-            except:
-                pass
         return False
 
 def scheduled_backup_job():
-    print("⏳ Запуск автоматичного планового бекапу...")
     generate_and_send_backup(LOG_CHANNEL_ID, is_automatic=True)
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(scheduled_backup_job, 'cron', hour=3, minute=0)
 scheduler.start()
 
-for admin_id in ADMIN_IDS:
-    try:
-        bot.send_message(admin_id, "🚀 Бот успішно запущено! Увімкнено перевірку підписок та повторні заявки.")
-    except:
-        pass
+# ----------------- ПЕРЕВІРКА ПІДПИСОК -----------------
 
-# ----------------- ЛОГІКА ДОСТУПУ ТА ПІДПИСОК -----------------
+def check_user_subscription(user_id):
+    if user_id in ADMIN_IDS:
+        return True
+    for channel in REQUIRED_CHANNELS:
+        try:
+            stat = bot.get_chat_member(channel, user_id).status
+            if stat in ['left', 'kicked']:
+                return False
+        except Exception as e:
+            print(f"Помилка перевірки підписки для {channel}: {e}")
+            return False
+    return True
+
+def send_subscription_prompt(chat_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("📢 Канал HackSlovak", url="https://t.me/hackslovak"),
+        types.InlineKeyboardButton("📝 Блог HackSlovak", url="https://t.me/hackslovak_blog"),
+        types.InlineKeyboardButton("✅ Я підписався", callback_data="check_subscription")
+    )
+    bot.send_message(
+        chat_id, 
+        "👋 **Привіт!**\n\nЩоб користуватися платформою Hackademia, необхідно бути підписаним на наші канали.\n\nПідпишіться та натисніть кнопку нижче 👇", 
+        reply_markup=markup, parse_mode="Markdown"
+    )
+
+# ----------------- ЛОГІКА ДОСТУПУ -----------------
 
 def process_user_access(message, user_id, first_name, username):
     remove_markup = types.ReplyKeyboardRemove()
-    temp_msg = bot.send_message(message.chat.id, "🔄 Перевіряю доступ...", reply_markup=remove_markup)
-    bot.delete_message(message.chat.id, temp_msg.message_id)
-
     try:
         response = supabase.table('users').select('*').eq('telegram_id', user_id).execute()
         if not response.data:
@@ -157,7 +169,7 @@ def process_user_access(message, user_id, first_name, username):
             except:
                 pass
 
-# ----------------- БОТ: КОМАНДИ Й ОБРОБНИКИ -----------------
+# ----------------- ОБРОБНИКИ КОМАНД І КНОПОК -----------------
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -165,60 +177,23 @@ def send_welcome(message):
     username = message.from_user.username
     first_name = message.from_user.first_name
 
-    # Перевірка обов'язкової підписки на канали (адміни проходять без перевірки)
-    if user_id not in ADMIN_IDS:
-        is_subscribed = True
-        for channel in REQUIRED_CHANNELS:
-            try:
-                stat = bot.get_chat_member(channel, user_id).status
-                if stat in ['left', 'kicked']:
-                    is_subscribed = False
-                    break
-            except Exception as e:
-                print(f"Помилка перевірки підписки (перевірте чи є бот адміном у {channel}): {e}")
-                is_subscribed = False
-                break
-                
-        if not is_subscribed:
-            markup = types.InlineKeyboardMarkup(row_width=1)
-            markup.add(
-                types.InlineKeyboardButton("📢 Канал HackSlovak", url="https://t.me/hackslovak"),
-                types.InlineKeyboardButton("📝 Блог HackSlovak", url="https://t.me/hackslovak_blog"),
-                types.InlineKeyboardButton("✅ Я підписався", callback_data="check_subscription")
-            )
-            bot.send_message(
-                message.chat.id, 
-                "👋 **Привіт!**\n\nЩоб користуватися платформою Hackademia, необхідно бути підписаним на наші канали.\n\nПідпишіться та натисніть кнопку нижче 👇", 
-                reply_markup=markup, parse_mode="Markdown"
-            )
-            return
+    if not check_user_subscription(user_id):
+        send_subscription_prompt(message.chat.id)
+        return
 
     process_user_access(message, user_id, first_name, username)
 
 # Обробник кнопки "Я підписався"
 @bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
 def verify_sub_callback(call):
-    bot.answer_callback_query(call.id, "Перевіряю підписку...")
     user_id = call.from_user.id
     
-    if user_id in ADMIN_IDS:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
-        return
-
-    is_subscribed = True
-    for channel in REQUIRED_CHANNELS:
+    if check_user_subscription(user_id):
+        bot.answer_callback_query(call.id, "✅ Підтверджено!")
         try:
-            stat = bot.get_chat_member(channel, user_id).status
-            if stat in ['left', 'kicked']:
-                is_subscribed = False
-                break
+            bot.delete_message(call.message.chat.id, call.message.message_id)
         except:
-            is_subscribed = False
-            break
-            
-    if is_subscribed:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
+            pass
         process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
     else:
         bot.answer_callback_query(call.id, "❌ Ви ще не підписалися на всі канали!", show_alert=True)
@@ -226,8 +201,15 @@ def verify_sub_callback(call):
 # Обробник кнопки "Надіслати запит повторно"
 @bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
 def handle_reapply(call):
-    bot.answer_callback_query(call.id, "Надсилаємо запит...")
     user_id = call.from_user.id
+    
+    # Спочатку перевіряємо підписку без зайвих відповідей на колбек
+    if not check_user_subscription(user_id):
+        bot.answer_callback_query(call.id, "❌ Підпишіться на канали перед подачею запиту!", show_alert=True)
+        send_subscription_prompt(call.message.chat.id)
+        return
+
+    bot.answer_callback_query(call.id, "⏳ Надсилаємо запит...")
     try:
         supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
         bot.edit_message_text(
@@ -260,13 +242,12 @@ def handle_reapply(call):
 
 @bot.message_handler(commands=['add'])
 def manual_add_user(message):
-    """Ручне додавання учня за ID: /add 123456789 Ім'я"""
     if message.from_user.id not in ADMIN_IDS:
         return
     try:
         parts = message.text.split(maxsplit=2)
         if len(parts) < 2:
-            bot.reply_to(message, "✍️ **Використання:** `/add ID [Ім'я]`\nПриклад: `/add 123456789 Іван`", parse_mode="Markdown")
+            bot.reply_to(message, "✍️ **Використання:** `/add ID [Ім'я]`", parse_mode="Markdown")
             return
             
         target_id = int(parts[1])
@@ -279,19 +260,17 @@ def manual_add_user(message):
             supabase.table('users').insert({'telegram_id': target_id, 'first_name': name, 'access_status': 'approved'}).execute()
             
         bot.reply_to(message, f"✅ Учня `{target_id}` успішно додано та схвалено!", parse_mode="Markdown")
-        
         try:
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
             bot.send_message(target_id, "🎉 **Адміністратор надав вам доступ!**\n\nТепер ви можете користуватися платформою.", reply_markup=markup, parse_mode="Markdown")
         except:
-            bot.reply_to(message, "⚠️ Користувача додано, але бот не зміг написати йому в ПП (можливо, він ще не натискав /start).")
+            pass
     except Exception as e:
         bot.reply_to(message, f"❌ Помилка: {e}")
 
 @bot.message_handler(func=lambda message: message.forward_date is not None)
 def handle_forwarded_message(message):
-    """Обробка пересланих повідомлень від користувачів"""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -311,19 +290,7 @@ def handle_forwarded_message(message):
                 types.InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{target_id}")
             )
             
-        bot.reply_to(
-            message, 
-            f"👤 **Профіль:** {name}\n🆔 **ID:** `{target_id}`\n📊 **Статус:** `{status}`\n\nЩо робимо?", 
-            reply_markup=markup, parse_mode="Markdown"
-        )
-    elif getattr(message, 'forward_sender_name', None):
-        hidden_name = message.forward_sender_name
-        bot.reply_to(
-            message, 
-            f"⚠️ Користувач *{hidden_name}* приховав свій акаунт у налаштуваннях приватності Telegram.\n\n"
-            f"Я не можу отримати його ID з репосту. Додайте його вручну через `/add ID`.",
-            parse_mode="Markdown"
-        )
+        bot.reply_to(message, f"👤 **Профіль:** {name}\n🆔 **ID:** `{target_id}`\n📊 **Статус:** `{status}`\n\nЩо робимо?", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
 def handle_access_decision(call):
@@ -352,7 +319,7 @@ def handle_access_decision(call):
                 bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
             except: pass
     except Exception as e:
-        print(f"CRITICAL ERROR in handle_access_decision: {e}")
+        print(f"CRITICAL ERROR: {e}")
 
 @bot.message_handler(commands=['users'])
 def manage_users(message):
@@ -419,6 +386,7 @@ def handle_logs_and_backups(message):
             bot.reply_to(message, "💾 Зарезервовано в кеш-каналі!")
         except: pass
 
+# Універсальний обробник
 @bot.callback_query_handler(func=lambda call: True)
 def catch_all_callbacks(call):
     try: bot.answer_callback_query(call.id, "⚠️ Ця кнопка застаріла! Напишіть боту /start", show_alert=True)
