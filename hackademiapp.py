@@ -216,19 +216,22 @@ def handle_reapply(call):
         send_subscription_prompt(call.message.chat.id)
         return
 
-    # 2. Якщо підписка є, продовжуємо оновлення в базі
+    # 2. Якщо підписка є, продовжуємо
     try:
+        # Оновлюємо статус в БД на pending
         supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
         
         # Відповідаємо колбеку ОДИН РАЗ про успіх
         bot.answer_callback_query(call.id, "✅ Запит успішно надіслано!")
         
+        # Змінюємо старе повідомлення, щоб кнопка зникла
         bot.edit_message_text(
             "⏳ Ваш повторний запит надіслано адміністратору! Очікуйте підтвердження.", 
             chat_id=call.message.chat.id, 
             message_id=call.message.message_id
         )
         
+        # Формуємо сповіщення адмінам
         last_name = call.from_user.last_name or ""
         full_name = f"{call.from_user.first_name} {last_name}".strip()
         username = call.from_user.username
@@ -246,11 +249,9 @@ def handle_reapply(call):
         for admin_id in ADMIN_IDS:
             try: 
                 bot.send_message(admin_id, notification_text, parse_mode="Markdown")
-            except Exception: 
+            except: 
                 pass
-                
     except Exception as e:
-        # У разі помилки бази даних — відповідаємо колбеку помилкою
         bot.answer_callback_query(call.id, f"❌ Помилка: {e}", show_alert=True)
 
 @bot.message_handler(commands=['add'])
