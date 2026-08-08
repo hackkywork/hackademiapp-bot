@@ -270,11 +270,13 @@ def manual_add_user(message):
         
         resp = supabase.table('users').select('*').eq('telegram_id', target_id).execute()
         if resp.data:
-            supabase.table('users').update({'access_status': 'approved', 'first_name': name}).eq('telegram_id', target_id).execute()
+            # ДОДАНО: needs_course_assignment: True
+            supabase.table('users').update({'access_status': 'approved', 'first_name': name, 'needs_course_assignment': True}).eq('telegram_id', target_id).execute()
         else:
-            supabase.table('users').insert({'telegram_id': target_id, 'first_name': name, 'access_status': 'approved'}).execute()
+            # ДОДАНО: needs_course_assignment: True
+            supabase.table('users').insert({'telegram_id': target_id, 'first_name': name, 'access_status': 'approved', 'needs_course_assignment': True}).execute()
             
-        bot.reply_to(message, f"✅ Учня `{target_id}` успішно додано та схвалено!", parse_mode="Markdown")
+        bot.reply_to(message, f"✅ Учня `{target_id}` успішно додано! На сайті з'явиться нагадування про вибір курсу.", parse_mode="Markdown")
         try:
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
@@ -283,29 +285,6 @@ def manual_add_user(message):
             pass
     except Exception as e:
         bot.reply_to(message, f"❌ Помилка: {e}")
-
-@bot.message_handler(func=lambda message: message.forward_date is not None)
-def handle_forwarded_message(message):
-    if message.from_user.id not in ADMIN_IDS:
-        return
-
-    if message.forward_from:
-        target_id = message.forward_from.id
-        name = message.forward_from.first_name
-        
-        response = supabase.table('users').select('*').eq('telegram_id', target_id).execute()
-        status = response.data[0].get('access_status', 'Немає в базі') if response.data else 'Немає в базі'
-        
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        if status == 'approved':
-            markup.add(types.InlineKeyboardButton("❌ Видалити доступ", callback_data=f"revoke_{target_id}"))
-        else:
-            markup.add(
-                types.InlineKeyboardButton("✅ Схвалити", callback_data=f"approve_{target_id}"),
-                types.InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{target_id}")
-            )
-            
-        bot.reply_to(message, f"👤 **Профіль:** {name}\n🆔 **ID:** `{target_id}`\n📊 **Статус:** `{status}`\n\nЩо робимо?", reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
 def handle_access_decision(call):
@@ -322,8 +301,9 @@ def handle_access_decision(call):
         target_user_id = int(target_user_id)
 
         if action == 'approve':
-            supabase.table('users').update({'access_status': 'approved'}).eq('telegram_id', target_user_id).execute()
-            bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n✅ Рішення: **СХВАЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
+            # ДОДАНО: needs_course_assignment: True
+            supabase.table('users').update({'access_status': 'approved', 'needs_course_assignment': True}).eq('telegram_id', target_user_id).execute()
+            bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n✅ Рішення: **СХВАЛЕНО**\n(На сайті з'явиться нагадування про курси)", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
             try:
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
