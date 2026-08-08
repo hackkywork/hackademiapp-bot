@@ -186,52 +186,50 @@ def send_welcome(message):
 # Обробник кнопки "Я підписався"
 @bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
 def verify_sub_callback(call):
+    # 1. ЗАЛІЗОБЕТОННО: Одразу гасимо "коліщатко" в 1-шу мілісекунду!
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
     user_id = call.from_user.id
     
-    # 1. ТИХО перевіряємо умову
-    if not check_user_subscription(user_id):
-        # Відповідаємо помилкою та перериваємо виконання (return)
-        bot.answer_callback_query(call.id, "❌ Ви ще не підписалися на всі канали!", show_alert=True)
-        return
-
-    # 2. Відповідаємо успіхом СУВОРО ОДИН РАЗ
-    bot.answer_callback_query(call.id, "✅ Підтверджено!")
-    
-    # 3. Виконуємо подальші дії
-    try:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-    except Exception:
-        pass
-        
-    process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
+    if check_user_subscription(user_id):
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
+    else:
+        bot.send_message(call.message.chat.id, "❌ Ви ще не підписалися на всі канали! Підпишіться та спробуйте знову.")
 
 # Обробник кнопки "Надіслати запит повторно"
 @bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
 def handle_reapply(call):
+    # 1. ЗАЛІЗОБЕТОННО: Миттєва відповідь Телеграму
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
     user_id = call.from_user.id
     
-    # 1. ТИХО перевіряємо підписку перед дією
-    if not check_user_subscription(user_id):
-        bot.answer_callback_query(call.id, "❌ Підпишіться на канали перед подачею запиту!", show_alert=True)
-        send_subscription_prompt(call.message.chat.id)
-        return
-
-    # 2. Якщо підписка є, продовжуємо
     try:
-        # Оновлюємо статус в БД на pending
+        # 2. Перевіряємо підписку
+        if not check_user_subscription(user_id):
+            bot.send_message(call.message.chat.id, "❌ Підпишіться на канали перед подачею запиту!")
+            send_subscription_prompt(call.message.chat.id)
+            return
+
+        # 3. Оновлюємо статус в базі
         supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
         
-        # Відповідаємо колбеку ОДИН РАЗ про успіх
-        bot.answer_callback_query(call.id, "✅ Запит успішно надіслано!")
+        # 4. Міняємо старе повідомлення, щоб кнопка зникла
+        try:
+            bot.edit_message_text(
+                "⏳ Ваш повторний запит надіслано адміністратору! Очікуйте підтвердження.", 
+                chat_id=call.message.chat.id, 
+                message_id=call.message.message_id
+            )
+        except: pass
         
-        # Змінюємо старе повідомлення, щоб кнопка зникла
-        bot.edit_message_text(
-            "⏳ Ваш повторний запит надіслано адміністратору! Очікуйте підтвердження.", 
-            chat_id=call.message.chat.id, 
-            message_id=call.message.message_id
-        )
-        
-        # Формуємо сповіщення адмінам
+        # 5. Формуємо сповіщення адмінам
         last_name = call.from_user.last_name or ""
         full_name = f"{call.from_user.first_name} {last_name}".strip()
         username = call.from_user.username
@@ -251,8 +249,9 @@ def handle_reapply(call):
                 bot.send_message(admin_id, notification_text, parse_mode="Markdown")
             except: 
                 pass
+                
     except Exception as e:
-        bot.answer_callback_query(call.id, f"❌ Помилка: {e}", show_alert=True)
+        bot.send_message(call.message.chat.id, f"❌ Виникла помилка під час обробки: {e}")
 
 @bot.message_handler(commands=['add'])
 def manual_add_user(message):
