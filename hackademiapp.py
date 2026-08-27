@@ -135,7 +135,7 @@ def process_user_access(message, user_id, first_name, username):
         
     if user_id in ADMIN_IDS or status == 'approved':
         markup = types.InlineKeyboardMarkup(row_width=1)
-        web_app_btn = types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app"))
+        web_app_btn = types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app/app"))
         markup.add(web_app_btn)
         bot.send_message(message.chat.id, f"Привіт, {first_name}! 👋 Я бот платформи **Hackademia** 🎓\n\n👇 Тисніть кнопку нижче, щоб розпочати роботу:", reply_markup=markup, parse_mode="Markdown")
     
