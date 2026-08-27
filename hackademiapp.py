@@ -116,14 +116,18 @@ def process_user_access(message, user_id, first_name, username):
     try:
         response = supabase.table('users').select('*').eq('telegram_id', user_id).execute()
         if not response.data:
+            # ТУТ ДОДАНО СОХРАНЕННЯ USERNAME
             supabase.table('users').insert({
                 'telegram_id': user_id, 
                 'first_name': first_name,
+                'username': username, # <-- ДОДАНО
                 'access_status': 'pending'
             }).execute()
             status = 'pending'
             send_email_alert(first_name, user_id)
         else:
+            # Оновлюємо username на випадок, якщо він змінився в Telegram
+            supabase.table('users').update({'username': username}).eq('telegram_id', user_id).execute() # <-- ДОДАНО
             status = response.data[0].get('access_status', 'pending')
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Помилка БД: {e}")
@@ -177,10 +181,47 @@ def send_welcome(message):
     username = message.from_user.username
     first_name = message.from_user.first_name
 
+    # 1. ЗАЛІЗОБЕТОННО: Спершу синхронізуємо юзера в базі та перевіряємо його статус
+    try:
+        response = supabase.table('users').select('*').eq('telegram_id', user_id).execute()
+        
+        # Якщо юзера ще немає в базі взагалі — створюємо зі статусом pending
+        if not response.data:
+            supabase.table('users').insert({
+                'telegram_id': user_id, 
+                'first_name': first_name,
+                'username': username,
+                'access_status': 'pending'
+            }).execute()
+            status = 'pending'
+            send_email_alert(first_name, user_id)
+        else:
+            # Якщо він є, оновлюємо юзернейм і забираємо поточний статус
+            supabase.table('users').update({'username': username}).eq('telegram_id', user_id).execute()
+            status = response.data[0].get('access_status', 'pending')
+    except Exception as e:
+        print(f"Помилка бази даних у /start: {e}")
+        status = 'pending'
+
+    # 2. Якщо учень ВЖЕ СХВАЛЕНИЙ або АДМІН — НЕ чіпаємо його підписками, даємо кнопку входу!
+    if user_id in ADMIN_IDS or status == 'approved':
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        web_app_btn = types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app"))
+        markup.add(web_app_btn)
+        bot.send_message(
+            message.chat.id, 
+            f"Привіт, {first_name}! 👋 Раді бачити тебе знову у **Hackademia** 🎓\n\n👇 Тисни кнопку нижче, щоб відкрити платформу:", 
+            reply_markup=markup, 
+            parse_mode="Markdown"
+        )
+        return
+
+    # 3. Для нових користувачів спочатку перевіряємо підписку на канали
     if not check_user_subscription(user_id):
         send_subscription_prompt(message.chat.id)
         return
 
+    # Якщо підписаний, але ще не схвалений — запускаємо стандартну обробку заявки
     process_user_access(message, user_id, first_name, username)
 
 # Обробник кнопки "Я підписався"
