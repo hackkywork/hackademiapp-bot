@@ -175,12 +175,12 @@ def process_user_access(message, user_id, first_name, username):
 
 # ----------------- ОБРОБНИКИ КОМАНД І КНОПОК -----------------
 
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start', 'support'])
 def send_welcome(message):
     # 1. ПЕРЕВІРКА НА ЗАПИТ ПІДТРИМКИ З САЙТУ
-    if "support" in message.text:
-        bot.send_message(message.chat.id, "💬 Вітаємо в службі підтримки! Напишіть ваше питання сюди, і ми скоро відповімо.")
-        return # Зупиняємо функцію, щоб не спрацювала перевірка доступу і помилка "скасовано"
+    if "support" in message.text or message.text == "/support":
+        bot.send_message(message.chat.id, "💬 Вітаємо в службі підтримки! Ми на зв'язку. Напишіть ваше питання сюди, і менеджер скоро вам відповість.")
+        return # Зупиняємо функцію, щоб не вибивало помилку про скасований доступ
 
     # 2. СТАНДАРТНА ЛОГІКА АВТОРИЗАЦІЇ
     user_id = message.from_user.id
