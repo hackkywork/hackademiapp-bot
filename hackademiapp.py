@@ -177,6 +177,12 @@ def process_user_access(message, user_id, first_name, username):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    # 1. ПЕРЕВІРКА НА ЗАПИТ ПІДТРИМКИ З САЙТУ
+    if "support" in message.text:
+        bot.send_message(message.chat.id, "💬 Вітаємо в службі підтримки! Напишіть ваше питання сюди, і ми скоро відповімо.")
+        return # Зупиняємо функцію, щоб не спрацювала перевірка доступу і помилка "скасовано"
+
+    # 2. СТАНДАРТНА ЛОГІКА АВТОРИЗАЦІЇ
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
