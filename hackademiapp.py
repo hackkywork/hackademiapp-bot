@@ -531,19 +531,47 @@ def handle_admin_reply(message):
     
     if original_text and "ID:" in original_text:
         try:
-            user_id_match = re.search(r'ID:\s*(\d+)', original_text)
+            # Шукаємо ID (це можуть бути цифри Telegram ID або UUID літери/дефіси бази даних)
+            user_id_match = re.search(r'ID:\s*([a-zA-Z0-9\-]+)', original_text)
+            
             if user_id_match:
-                target_user_id = int(user_id_match.group(1))
+                target_id = user_id_match.group(1).strip()
                 
-                if message.content_type == 'text':
-                    bot.send_message(target_user_id, f"👨‍💻 <b>Відповідь від менеджера:</b>\n\n{message.text}", parse_mode="HTML")
+                # СЦЕНАРІЙ 1: ЯКЩО ЦЕ TELEGRAM ID (складається тільки з цифр)
+                if target_id.isdigit():
+                    target_user_id = int(target_id)
+                    if message.content_type == 'text':
+                        bot.send_message(target_user_id, f"👨‍💻 <b>Відповідь від менеджера:</b>\n\n{message.text}", parse_mode="HTML")
+                    else:
+                        bot.send_message(target_user_id, "👨‍💻 <b>Відповідь від менеджера:</b>", parse_mode="HTML")
+                        bot.copy_message(target_user_id, message.chat.id, message.message_id)
+                    bot.reply_to(message, "✅ Відповідь успішно надіслана учню в Telegram!")
+                    
+                # СЦЕНАРІЙ 2: ЯКЩО ЦЕ ID З САЙТУ (UUID з дефісами, авторизація через Google)
                 else:
-                    bot.send_message(target_user_id, "👨‍💻 <b>Відповідь від менеджера:</b>", parse_mode="HTML")
-                    bot.copy_message(target_user_id, message.chat.id, message.message_id)
-                
-                bot.reply_to(message, "✅ Відповідь успішно надіслана учню!")
+                    if message.content_type != 'text':
+                        bot.reply_to(message, "❌ Для користувачів на сайті (через Google) наразі підтримується тільки текстова відповідь.")
+                        return
+                        
+                    # Знаходимо UUID адміна в базі, щоб відправити від його імені
+                    admin_resp = supabase.table('users').select('id').eq('telegram_id', message.from_user.id).execute()
+                    if not admin_resp.data:
+                        bot.reply_to(message, "❌ Ваш адмінський акаунт не знайдено в базі платформи. Перевірте, чи ви зареєстровані на сайті.")
+                        return
+                        
+                    admin_uuid = admin_resp.data[0]['id']
+                    
+                    # Записуємо відповідь безпосередньо у базу даних платформи
+                    supabase.table('messages').insert({
+                        'user_id': target_id,
+                        'sender_id': admin_uuid,
+                        'text': message.text,
+                        'is_read': False
+                    }).execute()
+                    
+                    bot.reply_to(message, "✅ Відповідь доставлена на сайт! (Учень побачить її у своєму віджеті чату)")
             else:
-                bot.reply_to(message, "❌ Не зміг знайти ID учня в цій заявці.")
+                bot.reply_to(message, "❌ Не зміг розпізнати ID учня в цій заявці.")
         except Exception as e:
             bot.reply_to(message, f"❌ Помилка відправки: {e}")
 
