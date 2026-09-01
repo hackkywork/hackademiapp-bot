@@ -157,13 +157,11 @@ def send_welcome(message):
     username = message.from_user.username
     first_name = message.from_user.first_name
     
-    # 1. ОБРОБКА ПЕРЕХОДУ З САЙТУ (Миттєве сповіщення адміну)
     if message.text == '/start support' or message.text == '/support':
         username_str = f"@{username}" if username else "Не вказано (приховано)"
         last_name = message.from_user.last_name or ""
         full_name = f"{first_name} {last_name}".strip()
         
-        # Миттєвий перехват ліда
         admin_msg = (
             f"🔥 <b>НОВИЙ ЛІД У БОТІ! (Щойно зайшов з сайту)</b>\n\n"
             f"<i>Людина відкрила бота через віджет підтримки. Вона ще нічого не написала, але ви вже маєте її контакт:</i>\n\n"
@@ -184,7 +182,6 @@ def send_welcome(message):
         process_user_access(message, user_id, first_name, username)
         return
 
-    # 2. ПЕРЕВІРКА НА ЗАПИТ ПІДТРИМКИ (ЗІ СТАРИМ ПІН-КОДОМ)
     if message.text.startswith('/start pin_'):
         bot.send_message(
             message.chat.id, 
@@ -194,7 +191,6 @@ def send_welcome(message):
         process_user_access(message, user_id, first_name, username)
         return
 
-    # 3. СТАНДАРТНА ЛОГІКА АВТОРИЗАЦІЇ (Простий /start)
     process_user_access(message, user_id, first_name, username)
 
 # --- ВОРОНКА ПІДБОРУ НАВЧАННЯ ---
@@ -225,8 +221,11 @@ def handle_support_menu(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('lvl_'))
 def handle_level_selection(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    print(f"👉 Отримано клік рівня: {call.data}")
+    try: 
+        bot.answer_callback_query(call.id, text="Завантажую...")
+    except Exception as e: 
+        print(f"⚠️ Помилка зняття спінера (lvl): {e}")
     
     level = call.data.split('_')[1] 
     
@@ -245,13 +244,17 @@ def handle_level_selection(call):
             parse_mode="HTML",
             reply_markup=markup
         )
+        print("✅ Повідомлення рівня успішно змінено.")
     except Exception as e:
-        print(f"Помилка редагування: {e}")
+        print(f"❌ Помилка редагування (lvl): {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_levels')
 def handle_back_to_levels(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    print(f"👉 Отримано клік 'Назад': {call.data}")
+    try: 
+        bot.answer_callback_query(call.id)
+    except Exception as e: 
+        print(f"⚠️ Помилка зняття спінера (back): {e}")
     
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -269,12 +272,15 @@ def handle_back_to_levels(call):
             reply_markup=markup
         )
     except Exception as e:
-        print(f"Помилка редагування: {e}")
+        print(f"❌ Помилка редагування (back): {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('fmt_'))
 def handle_format_selection(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    print(f"👉 Отримано клік формату: {call.data}")
+    try: 
+        bot.answer_callback_query(call.id, text="Заявку прийнято!")
+    except Exception as e: 
+        print(f"⚠️ Помилка зняття спінера (fmt): {e}")
     
     parts = call.data.split('_')
     level = parts[1]
@@ -316,11 +322,12 @@ def handle_format_selection(call):
             reply_markup=markup
         )
     except Exception as e:
-        print(f"Помилка редагування: {e}")
+        print(f"❌ Помилка редагування (fmt): {e}")
 # --- КІНЕЦЬ БЛОКУ ВОРОНКИ ---
 
 @bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
 def handle_reapply(call):
+    print(f"👉 Отримано клік 'Повторний запит': {call.data}")
     try: bot.answer_callback_query(call.id)
     except: pass
     
