@@ -649,4 +649,4 @@ if __name__ == '__main__':
     try:
         bot.infinity_polling(timeout=20, long_polling_timeout=15)
     except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
+        scheduler.shutdown() 
