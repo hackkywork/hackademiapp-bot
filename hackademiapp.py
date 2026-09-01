@@ -270,7 +270,7 @@ def handle_price_callbacks(call):
         message_id=call.message.message_id, 
         parse_mode="Markdown", 
         reply_markup=markup
-    )
+    ) 
 
 # Обробник кнопки "Я підписався"
 @bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
