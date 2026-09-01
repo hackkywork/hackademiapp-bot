@@ -410,13 +410,48 @@ def handle_photo(message):
         bot.reply_to(message, f"✅ Картинку оброблено!\n\n**Пряме посилання:**\n`{direct_url}`", parse_mode="Markdown")
     except: pass
 
-@bot.message_handler(func=lambda message: True, content_types=['text', 'document', 'audio'])
-def handle_logs_and_backups(message):
-    if message.from_user.id in ADMIN_IDS and not message.text.startswith('/'):
+@bot.message_handler(func=lambda message: True, content_types=['text', 'document', 'audio', 'photo', 'video'])
+def handle_all_other_messages(message):
+    # 1. ЯКЩО ЦЕ АДМІН (зберігаємо в кеш-канал)
+    if message.from_user.id in ADMIN_IDS:
+        if message.content_type == 'text' and message.text.startswith('/'):
+            return # Ігноруємо команди, бо вони обробляються вище
         try:
             bot.forward_message(LOG_CHANNEL_ID, message.chat.id, message.message_id)
             bot.reply_to(message, "💾 Зарезервовано в кеш-каналі!")
         except: pass
+        
+    # 2. ЯКЩО ЦЕ УЧЕНЬ ПИШЕ В ПІДТРИМКУ
+    else:
+        first_name = message.from_user.first_name or ""
+        last_name = message.from_user.last_name or ""
+        full_name = f"{first_name} {last_name}".strip()
+        username = f"@{message.from_user.username}" if message.from_user.username else "Не вказано"
+        user_id = message.from_user.id
+        
+        # Визначаємо текст повідомлення або тип файлу
+        text = message.text if message.content_type == 'text' else f"📁 Надіслав медіафайл ({message.content_type})"
+
+        notification_text = (
+            f"📩 **НОВЕ ПОВІДОМЛЕННЯ ВІД УЧНЯ (ЧЕРЕЗ БОТА)**\n\n"
+            f"👤 **Учень:** {full_name}\n"
+            f"🔗 **Юзернейм:** {username}\n"
+            f"🆔 **ID:** `{user_id}`\n\n"
+            f"💬 **Текст:**\n{text}"
+        )
+
+        # Відправляємо заявку всім адмінам
+        for admin_id in ADMIN_IDS:
+            try:
+                bot.send_message(admin_id, notification_text, parse_mode="Markdown")
+                # Якщо учень скинув фото/файл, пересилаємо його адміну теж
+                if message.content_type != 'text':
+                     bot.forward_message(admin_id, message.chat.id, message.message_id)
+            except:
+                pass
+        
+        # Відповідаємо учню, щоб він розумів, що його почули
+        bot.reply_to(message, "✅ Ваше повідомлення успішно надіслано в службу підтримки. Менеджер незабаром вам відповість!")
 
 # Універсальний обробник
 @bot.callback_query_handler(func=lambda call: True)
