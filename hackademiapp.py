@@ -174,12 +174,11 @@ def process_user_access(message, user_id, first_name, username):
                 pass
 
 def get_support_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
     markup.add(
-        types.KeyboardButton("📘 Дізнатися ціни"),
-        types.KeyboardButton("🎓 Рівні та формати")
+        types.KeyboardButton("📚 Підібрати навчання"),
+        types.KeyboardButton("👨‍💻 Зв'язатися з менеджером")
     )
-    markup.add(types.KeyboardButton("👨‍💻 Зв'язатися з менеджером"))
     return markup
 
 # ----------------- ОБРОБНИКИ КОМАНД І КНОПОК -----------------
@@ -225,20 +224,22 @@ def send_welcome(message):
         status = 'pending'
 
 
-@bot.message_handler(func=lambda message: message.text in ["📘 Дізнатися ціни", "🎓 Рівні та формати", "👨‍💻 Зв'язатися з менеджером"])
+@bot.message_handler(func=lambda message: message.text in ["📚 Підібрати навчання", "👨‍💻 Зв'язатися з менеджером", "📘 Дізнатися ціни", "🎓 Рівні та формати"])
 def handle_support_menu(message):
-    if message.text in ["📘 Дізнатися ціни", "🎓 Рівні та формати"]:
-        markup = types.InlineKeyboardMarkup(row_width=1)
+    # Ловимо і нову кнопку, і старі (на випадок, якщо в когось залишилось старе меню)
+    if message.text in ["📚 Підібрати навчання", "📘 Дізнатися ціни", "🎓 Рівні та формати"]:
+        markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
-            types.InlineKeyboardButton("Група А1 / А2", callback_data="price_a1a2"),
-            types.InlineKeyboardButton("Група B1", callback_data="price_b1"),
-            types.InlineKeyboardButton("Індивідуальні заняття", callback_data="price_ind"),
-            types.InlineKeyboardButton("👨‍💻 Написати менеджеру", url="https://t.me/xackademia")
+            types.InlineKeyboardButton("Рівень A1", callback_data="lvl_A1"),
+            types.InlineKeyboardButton("Рівень A2", callback_data="lvl_A2"),
+            types.InlineKeyboardButton("Рівень B1", callback_data="lvl_B1"),
+            types.InlineKeyboardButton("Рівень B2", callback_data="lvl_B2")
         )
         bot.send_message(
             message.chat.id,
-            "Вартість та формат навчання залежать від вашого поточного рівня. Що саме вас цікавить?",
-            reply_markup=markup
+            "Для того, щоб підібрати для вас найкращі умови, скажіть, **який рівень словацької мови вас цікавить?**",
+            reply_markup=markup,
+            parse_mode="Markdown"
         )
     elif message.text == "👨‍💻 Зв'язатися з менеджером":
         markup = types.InlineKeyboardMarkup()
@@ -249,28 +250,96 @@ def handle_support_menu(message):
             reply_markup=markup
         )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('price_'))
-def handle_price_callbacks(call):
+# ОБРОБКА ВИБОРУ РІВНЯ
+@bot.callback_query_handler(func=lambda call: call.data.startswith('lvl_'))
+def handle_level_selection(call):
     try: bot.answer_callback_query(call.id)
     except: pass
-
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("👨‍💻 Уточнити ціну / Записатися", url="https://t.me/xackademia"))
-
-    if call.data == "price_a1a2":
-        text = "📚 **Група А1 / А2 (до 6 осіб)**\n\n- 16 занять (2 місяці)\n- 2 рази на тиждень по 1.5 год\n\nЧудовий старт у дружній атмосфері! Для уточнення актуальної ціни та розкладу напишіть менеджеру."
-    elif call.data == "price_b1":
-        text = "📘 **Група B1 (Популярний)**\n\n- 24 заняття (~2.5 місяці)\n- 2 рази на тиждень по 1.5 год\n\nПоглиблене вивчення для тих, хто вже має базу. Для уточнення ціни та наявності місць напишіть нам."
-    elif call.data == "price_ind":
-        text = "🎯 **Індивідуально (1 особа або пара)**\n\n- Власний гнучкий графік\n- 100% уваги викладача\n- Повна адаптація під ваші цілі\n\nНапишіть менеджеру, щоб узгодити графік та прорахувати вартість."
-
+    
+    level = call.data.split('_')[1] # Отримуємо A1, A2 і т.д.
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("👥 Групові", callback_data=f"fmt_{level}_group"),
+        types.InlineKeyboardButton("🎯 Індивідуальні", callback_data=f"fmt_{level}_ind")
+    )
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_to_levels"))
+    
     bot.edit_message_text(
-        text, 
-        chat_id=call.message.chat.id, 
-        message_id=call.message.message_id, 
-        parse_mode="Markdown", 
+        f"Ви обрали **Рівень {level}**.\n\nЯкий формат занять вам підходить найбільше?",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="Markdown",
         reply_markup=markup
-    ) 
+    )
+
+# ПОВЕРНЕННЯ НАЗАК ДО РІВНІВ
+@bot.callback_query_handler(func=lambda call: call.data == 'back_to_levels')
+def handle_back_to_levels(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("Рівень A1", callback_data="lvl_A1"),
+        types.InlineKeyboardButton("Рівень A2", callback_data="lvl_A2"),
+        types.InlineKeyboardButton("Рівень B1", callback_data="lvl_B1"),
+        types.InlineKeyboardButton("Рівень B2", callback_data="lvl_B2")
+    )
+    bot.edit_message_text(
+        "Для того, щоб підібрати для вас найкращі умови, скажіть, **який рівень словацької мови вас цікавить?**",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
+# ОБРОБКА ВИБОРУ ФОРМАТУ ТА ВІДПРАВКА ЛІДА АДМІНУ
+@bot.callback_query_handler(func=lambda call: call.data.startswith('fmt_'))
+def handle_format_selection(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
+    # Розбираємо дані з кнопки (наприклад, fmt_A1_group)
+    parts = call.data.split('_')
+    level = parts[1]
+    format_type = "Групові заняття" if parts[2] == "group" else "Індивідуальні заняття"
+    
+    # 1. Формуємо ЛІД для адмінів
+    first_name = call.from_user.first_name or ""
+    last_name = call.from_user.last_name or ""
+    full_name = f"{first_name} {last_name}".strip()
+    username = f"@{call.from_user.username}" if call.from_user.username else "Не вказано (приховано)"
+    
+    admin_msg = (
+        f"🔥 **НОВИЙ ГАРЯЧИЙ ЛІД!**\n\n"
+        f"👤 **Учень:** {full_name}\n"
+        f"🔗 **Юзернейм:** {username}\n"
+        f"📊 **Цікавить рівень:** {level}\n"
+        f"🏫 **Формат:** {format_type}\n\n"
+        f"💬 _Напишіть йому якомога швидше, щоб запропонувати ціну та розклад!_"
+    )
+    
+    for admin_id in ADMIN_IDS:
+        try: bot.send_message(admin_id, admin_msg, parse_mode="Markdown")
+        except: pass
+        
+    # 2. Відповідаємо клієнту, закриваючи воронку
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("👨‍💻 Написати менеджеру зараз", url="https://t.me/xackademia"))
+    
+    bot.edit_message_text(
+        f"✅ **Вашу заявку успішно прийнято!**\n\n"
+        f"Ви обрали:\n"
+        f"Курс: **Рівень {level}**\n"
+        f"Формат: **{format_type}**\n\n"
+        f"Наш менеджер зв'яжеться з вами найближчим часом, щоб надати актуальну інформацію щодо цін, розкладу та відповісти на всі питання.\n\n"
+        f"Якщо не хочете чекати, можете написати нам напряму 👇",
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
 
 # Обробник кнопки "Я підписався"
 @bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
