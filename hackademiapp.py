@@ -16,9 +16,6 @@ TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_IDS = [597686904, 5604755902]  # Адміни
 LOG_CHANNEL_ID = -1001240560482  # Кеш-канал
 
-# Обов'язкові канали для підписки
-REQUIRED_CHANNELS = ["@hackslovak", "@hackslovak_blog"]
-
 # Налаштування Пошти
 GMAIL_ACCOUNT = "hackslovak@gmail.com"
 GMAIL_PASSWORD = os.getenv('GMAIL_PASSWORD')
@@ -81,34 +78,6 @@ def scheduled_backup_job():
 scheduler = BackgroundScheduler()
 scheduler.add_job(scheduled_backup_job, 'cron', hour=3, minute=0)
 scheduler.start()
-
-# ----------------- ПЕРЕВІРКА ПІДПИСОК -----------------
-
-def check_user_subscription(user_id):
-    if user_id in ADMIN_IDS:
-        return True
-    for channel in REQUIRED_CHANNELS:
-        try:
-            stat = bot.get_chat_member(channel, user_id).status
-            if stat in ['left', 'kicked']:
-                return False
-        except Exception as e:
-            print(f"Помилка перевірки підписки для {channel}: {e}")
-            return False
-    return True
-
-def send_subscription_prompt(chat_id):
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton("📢 Канал HackSlovak", url="https://t.me/hackslovak"),
-        types.InlineKeyboardButton("📝 Блог HackSlovak", url="https://t.me/hackslovak_blog"),
-        types.InlineKeyboardButton("✅ Я підписався", callback_data="check_subscription")
-    )
-    bot.send_message(
-        chat_id, 
-        "👋 <b>Привіт!</b>\n\nЩоб користуватися платформою Hackademia, необхідно бути підписаним на наші канали.\n\nПідпишіться та натисніть кнопку нижче 👇", 
-        reply_markup=markup, parse_mode="HTML"
-    )
 
 # ----------------- ЛОГІКА ДОСТУПУ -----------------
 
@@ -256,8 +225,7 @@ def handle_support_menu(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('lvl_'))
 def handle_level_selection(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    bot.answer_callback_query(call.id)
     
     level = call.data.split('_')[1] 
     
@@ -281,8 +249,7 @@ def handle_level_selection(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_levels')
 def handle_back_to_levels(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    bot.answer_callback_query(call.id)
     
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -304,8 +271,7 @@ def handle_back_to_levels(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('fmt_'))
 def handle_format_selection(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    bot.answer_callback_query(call.id)
     
     parts = call.data.split('_')
     level = parts[1]
@@ -350,31 +316,12 @@ def handle_format_selection(call):
         print(f"Помилка редагування: {e}")
 # --- КІНЕЦЬ БЛОКУ ВОРОНКИ ---
 
-@bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
-def verify_sub_callback(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
-    
-    user_id = call.from_user.id
-    if check_user_subscription(user_id):
-        try: bot.delete_message(call.message.chat.id, call.message.message_id)
-        except: pass
-        process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
-    else:
-        bot.send_message(call.message.chat.id, "❌ Ви ще не підписалися на всі канали! Підпишіться та спробуйте знову.")
-
 @bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
 def handle_reapply(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    bot.answer_callback_query(call.id)
     
     user_id = call.from_user.id
     try:
-        if not check_user_subscription(user_id):
-            bot.send_message(call.message.chat.id, "❌ Підпишіться на канали перед подачею запиту!")
-            send_subscription_prompt(call.message.chat.id)
-            return
-
         supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
         
         try:
@@ -437,8 +384,7 @@ def manual_add_user(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
 def handle_access_decision(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    bot.answer_callback_query(call.id)
 
     if call.from_user.id not in ADMIN_IDS:
         bot.send_message(call.message.chat.id, "❌ У вас немає прав!")
@@ -485,8 +431,7 @@ def manage_users(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('revoke_'))
 def handle_revoke(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    bot.answer_callback_query(call.id)
 
     if call.from_user.id not in ADMIN_IDS:
         bot.send_message(call.message.chat.id, "❌ Немає прав!")
@@ -534,63 +479,19 @@ def handle_admin_reply(message):
     
     if original_text and "ID:" in original_text:
         try:
-            user_id_match = re.search(r'ID:\s*([a-zA-Z0-9\-]+)', original_text)
+            user_id_match = re.search(r'ID:\s*(\d+)', original_text)
             if user_id_match:
-                target_id = user_id_match.group(1).strip()
+                target_user_id = int(user_id_match.group(1))
                 
-                # СЦЕНАРІЙ 1: TELEGRAM ID
-                if target_id.isdigit():
-                    target_user_id = int(target_id)
-                    if message.content_type == 'text':
-                        bot.send_message(target_user_id, f"👨‍💻 <b>Відповідь від менеджера:</b>\n\n{message.text}", parse_mode="HTML")
-                    else:
-                        bot.send_message(target_user_id, "👨‍💻 <b>Відповідь від менеджера:</b>", parse_mode="HTML")
-                        bot.copy_message(target_user_id, message.chat.id, message.message_id)
-                    bot.reply_to(message, "✅ Відповідь успішно надіслана учню в Telegram!")
-                    
-                # СЦЕНАРІЙ 2: ID З САЙТУ (Живий чат + Email)
+                if message.content_type == 'text':
+                    bot.send_message(target_user_id, f"👨‍💻 <b>Відповідь від менеджера:</b>\n\n{message.text}", parse_mode="HTML")
                 else:
-                    if message.content_type != 'text':
-                        bot.reply_to(message, "❌ Для користувачів на сайті наразі підтримується тільки текстова відповідь.")
-                        return
-                        
-                    admin_resp = supabase.table('users').select('id').eq('telegram_id', message.from_user.id).execute()
-                    if not admin_resp.data:
-                        bot.reply_to(message, "❌ Ваш адмінський акаунт не знайдено в базі платформи.")
-                        return
-                        
-                    admin_uuid = admin_resp.data[0]['id']
-                    
-                    # 1. Записуємо в БД (Сайт миттєво підтягне це в живий чат)
-                    supabase.table('messages').insert({
-                        'user_id': target_id,
-                        'sender_id': admin_uuid,
-                        'text': message.text,
-                        'is_read': False
-                    }).execute()
-                    
-                    # 2. Дублюємо на Email
-                    user_resp = supabase.table('users').select('email', 'first_name').eq('id', target_id).execute()
-                    if user_resp.data and user_resp.data[0].get('email'):
-                        user_email = user_resp.data[0]['email']
-                        user_name = user_resp.data[0].get('first_name', 'Студент')
-                        try:
-                            msg = MIMEText(f"Привіт, {user_name}!\n\nМенеджер Hackademia щойно відповів на ваше запитання:\n\n\"{message.text}\"\n\nВи можете продовжити спілкування прямо на сайті у віджеті підтримки.")
-                            msg['Subject'] = 'Відповідь від підтримки Hackademia'
-                            msg['From'] = GMAIL_ACCOUNT
-                            msg['To'] = user_email
-                            
-                            server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-                            server.login(GMAIL_ACCOUNT, GMAIL_PASSWORD)
-                            server.send_message(msg)
-                            server.quit()
-                            bot.reply_to(message, f"✅ Відповідь надіслана на сайт та продубльована на email: {user_email}")
-                        except Exception as e:
-                            bot.reply_to(message, f"✅ Відповідь на сайті збережена. ⚠️ Помилка email: {e}")
-                    else:
-                        bot.reply_to(message, "✅ Відповідь доставлена на сайт! (Email користувача не знайдено)")
+                    bot.send_message(target_user_id, "👨‍💻 <b>Відповідь від менеджера:</b>", parse_mode="HTML")
+                    bot.copy_message(target_user_id, message.chat.id, message.message_id)
+                
+                bot.reply_to(message, "✅ Відповідь успішно надіслана учню!")
             else:
-                bot.reply_to(message, "❌ Не зміг розпізнати ID учня в цій заявці.")
+                bot.reply_to(message, "❌ Не зміг знайти ID учня в цій заявці.")
         except Exception as e:
             bot.reply_to(message, f"❌ Помилка відправки: {e}")
 
@@ -635,8 +536,7 @@ def handle_all_other_messages(message):
 # Універсальний обробник
 @bot.callback_query_handler(func=lambda call: True)
 def catch_all_callbacks(call):
-    try: bot.answer_callback_query(call.id)
-    except: pass
+    bot.answer_callback_query(call.id)
 
 if __name__ == '__main__':
     keep_alive()
@@ -649,4 +549,4 @@ if __name__ == '__main__':
     try:
         bot.infinity_polling(timeout=20, long_polling_timeout=15)
     except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown() 
+        scheduler.shutdown()
