@@ -534,13 +534,11 @@ def handle_admin_reply(message):
     
     if original_text and "ID:" in original_text:
         try:
-            # Шукаємо ID (це можуть бути цифри Telegram ID або UUID літери/дефіси бази даних)
             user_id_match = re.search(r'ID:\s*([a-zA-Z0-9\-]+)', original_text)
-            
             if user_id_match:
                 target_id = user_id_match.group(1).strip()
                 
-                # СЦЕНАРІЙ 1: ЯКЩО ЦЕ TELEGRAM ID (складається тільки з цифр)
+                # СЦЕНАРІЙ 1: TELEGRAM ID
                 if target_id.isdigit():
                     target_user_id = int(target_id)
                     if message.content_type == 'text':
@@ -550,21 +548,20 @@ def handle_admin_reply(message):
                         bot.copy_message(target_user_id, message.chat.id, message.message_id)
                     bot.reply_to(message, "✅ Відповідь успішно надіслана учню в Telegram!")
                     
-                # СЦЕНАРІЙ 2: ЯКЩО ЦЕ ID З САЙТУ (UUID з дефісами, авторизація через Google)
+                # СЦЕНАРІЙ 2: ID З САЙТУ (Живий чат + Email)
                 else:
                     if message.content_type != 'text':
-                        bot.reply_to(message, "❌ Для користувачів на сайті (через Google) наразі підтримується тільки текстова відповідь.")
+                        bot.reply_to(message, "❌ Для користувачів на сайті наразі підтримується тільки текстова відповідь.")
                         return
                         
-                    # Знаходимо UUID адміна в базі, щоб відправити від його імені
                     admin_resp = supabase.table('users').select('id').eq('telegram_id', message.from_user.id).execute()
                     if not admin_resp.data:
-                        bot.reply_to(message, "❌ Ваш адмінський акаунт не знайдено в базі платформи. Перевірте, чи ви зареєстровані на сайті.")
+                        bot.reply_to(message, "❌ Ваш адмінський акаунт не знайдено в базі платформи.")
                         return
                         
                     admin_uuid = admin_resp.data[0]['id']
                     
-                    # Записуємо відповідь безпосередньо у базу даних платформи
+                    # 1. Записуємо в БД (Сайт миттєво підтягне це в живий чат)
                     supabase.table('messages').insert({
                         'user_id': target_id,
                         'sender_id': admin_uuid,
@@ -572,7 +569,26 @@ def handle_admin_reply(message):
                         'is_read': False
                     }).execute()
                     
-                    bot.reply_to(message, "✅ Відповідь доставлена на сайт! (Учень побачить її у своєму віджеті чату)")
+                    # 2. Дублюємо на Email
+                    user_resp = supabase.table('users').select('email', 'first_name').eq('id', target_id).execute()
+                    if user_resp.data and user_resp.data[0].get('email'):
+                        user_email = user_resp.data[0]['email']
+                        user_name = user_resp.data[0].get('first_name', 'Студент')
+                        try:
+                            msg = MIMEText(f"Привіт, {user_name}!\n\nМенеджер Hackademia щойно відповів на ваше запитання:\n\n\"{message.text}\"\n\nВи можете продовжити спілкування прямо на сайті у віджеті підтримки.")
+                            msg['Subject'] = 'Відповідь від підтримки Hackademia'
+                            msg['From'] = GMAIL_ACCOUNT
+                            msg['To'] = user_email
+                            
+                            server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+                            server.login(GMAIL_ACCOUNT, GMAIL_PASSWORD)
+                            server.send_message(msg)
+                            server.quit()
+                            bot.reply_to(message, f"✅ Відповідь надіслана на сайт та продубльована на email: {user_email}")
+                        except Exception as e:
+                            bot.reply_to(message, f"✅ Відповідь на сайті збережена. ⚠️ Помилка email: {e}")
+                    else:
+                        bot.reply_to(message, "✅ Відповідь доставлена на сайт! (Email користувача не знайдено)")
             else:
                 bot.reply_to(message, "❌ Не зміг розпізнати ID учня в цій заявці.")
         except Exception as e:
