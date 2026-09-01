@@ -1,5 +1,6 @@
 import os
 import telebot
+import re
 from keep_alive import keep_alive
 from telebot import types
 import json
@@ -317,7 +318,8 @@ def handle_format_selection(call):
         f"🔗 **Юзернейм:** {username}\n"
         f"📊 **Цікавить рівень:** {level}\n"
         f"🏫 **Формат:** {format_type}\n\n"
-        f"💬 _Напишіть йому якомога швидше, щоб запропонувати ціну та розклад!_"
+        f"🆔 ID: {call.from_user.id}\n\n"
+        f"💬 _Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення._"
     )
     
     for admin_id in ADMIN_IDS:
@@ -539,6 +541,33 @@ def handle_photo(message):
         bot.reply_to(message, f"✅ Картинку оброблено!\n\n**Пряме посилання:**\n`{direct_url}`", parse_mode="Markdown")
     except: pass
 
+# ОБРОБКА ВІДПОВІДЕЙ АДМІНА ЧЕРЕЗ БОТА
+@bot.message_handler(func=lambda message: message.reply_to_message is not None and message.from_user.id in ADMIN_IDS, content_types=['text', 'photo', 'document', 'audio', 'voice', 'video'])
+def handle_admin_reply(message):
+    # Отримуємо текст оригінального повідомлення-заявки
+    original_text = message.reply_to_message.text or message.reply_to_message.caption
+    
+    if original_text and "ID:" in original_text:
+        try:
+            # Шукаємо ID учня у тексті заявки (формат "ID: 123456789")
+            user_id_match = re.search(r'ID:\s*(\d+)', original_text)
+            if user_id_match:
+                target_user_id = int(user_id_match.group(1))
+                
+                # Якщо адмін відповів текстом
+                if message.content_type == 'text':
+                    bot.send_message(target_user_id, f"👨‍💻 **Відповідь від менеджера:**\n\n{message.text}", parse_mode="Markdown")
+                # Якщо адмін відповів фото/відео/голосовим
+                else:
+                    bot.send_message(target_user_id, "👨‍💻 **Відповідь від менеджера:**", parse_mode="Markdown")
+                    bot.copy_message(target_user_id, message.chat.id, message.message_id)
+                
+                bot.reply_to(message, "✅ Відповідь успішно надіслана учню!")
+            else:
+                bot.reply_to(message, "❌ Не зміг знайти ID учня в цій заявці.")
+        except Exception as e:
+            bot.reply_to(message, f"❌ Помилка відправки: {e}")
+
 @bot.message_handler(func=lambda message: True, content_types=['text', 'document', 'audio', 'photo', 'video'])
 def handle_all_other_messages(message):
     # 1. ЯКЩО ЦЕ АДМІН (зберігаємо в кеш-канал)
@@ -565,8 +594,9 @@ def handle_all_other_messages(message):
             f"📩 **НОВЕ ПОВІДОМЛЕННЯ ВІД УЧНЯ (ЧЕРЕЗ БОТА)**\n\n"
             f"👤 **Учень:** {full_name}\n"
             f"🔗 **Юзернейм:** {username}\n"
-            f"🆔 **ID:** `{user_id}`\n\n"
-            f"💬 **Текст:**\n{text}"
+            f"🆔 ID: {user_id}\n\n"
+            f"💬 **Текст:**\n{text}\n\n"
+            f"💬 _Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення._"
         )
 
         # Відправляємо заявку всім адмінам
