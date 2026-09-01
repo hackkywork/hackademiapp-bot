@@ -70,7 +70,7 @@ def generate_and_send_backup(chat_id_target, is_automatic=False):
         file_stream.name = f"hackademia_backup_{current_time_str}.json"
         
         caption = f"{backup_type_label}\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        bot.send_document(chat_id_target, file_stream, caption=caption, parse_mode="Markdown")
+        bot.send_document(chat_id_target, file_stream, caption=caption, parse_mode="HTML")
         return True
     except Exception as e:
         return False
@@ -106,8 +106,8 @@ def send_subscription_prompt(chat_id):
     )
     bot.send_message(
         chat_id, 
-        "👋 **Привіт!**\n\nЩоб користуватися платформою Hackademia, необхідно бути підписаним на наші канали.\n\nПідпишіться та натисніть кнопку нижче 👇", 
-        reply_markup=markup, parse_mode="Markdown"
+        "👋 <b>Привіт!</b>\n\nЩоб користуватися платформою Hackademia, необхідно бути підписаним на наші канали.\n\nПідпишіться та натисніть кнопку нижче 👇", 
+        reply_markup=markup, parse_mode="HTML"
     )
 
 # ----------------- ЛОГІКА ДОСТУПУ -----------------
@@ -117,18 +117,16 @@ def process_user_access(message, user_id, first_name, username):
     try:
         response = supabase.table('users').select('*').eq('telegram_id', user_id).execute()
         if not response.data:
-            # ТУТ ДОДАНО СОХРАНЕННЯ USERNAME
             supabase.table('users').insert({
                 'telegram_id': user_id, 
                 'first_name': first_name,
-                'username': username, # <-- ДОДАНО
+                'username': username,
                 'access_status': 'pending'
             }).execute()
             status = 'pending'
             send_email_alert(first_name, user_id)
         else:
-            # Оновлюємо username на випадок, якщо він змінився в Telegram
-            supabase.table('users').update({'username': username}).eq('telegram_id', user_id).execute() # <-- ДОДАНО
+            supabase.table('users').update({'username': username}).eq('telegram_id', user_id).execute()
             status = response.data[0].get('access_status', 'pending')
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Помилка БД: {e}")
@@ -138,17 +136,17 @@ def process_user_access(message, user_id, first_name, username):
         markup = types.InlineKeyboardMarkup(row_width=1)
         web_app_btn = types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app/app"))
         markup.add(web_app_btn)
-        bot.send_message(message.chat.id, f"Привіт, {first_name}! 👋 Я бот платформи **Hackademia** 🎓\n\n👇 Тисніть кнопку нижче, щоб розпочати роботу:", reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"Привіт, {first_name}! 👋 Я бот платформи <b>Hackademia</b> 🎓\n\n👇 Тисніть кнопку нижче, щоб розпочати роботу:", reply_markup=markup, parse_mode="HTML")
     
     elif status == 'rejected':
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("🔄 Надіслати запит повторно", callback_data="reapply_access"))
         bot.send_message(
             message.chat.id, 
-            "❌ **Ваш доступ до платформи скасовано.**\n\n"
+            "❌ <b>Ваш доступ до платформи скасовано.</b>\n\n"
             "Щоб відновити доступ, придбайте новий курс або лекцію. "
             "Після оплати натисніть кнопку нижче, щоб надіслати запит адміністратору.", 
-            reply_markup=markup, parse_mode="Markdown"
+            reply_markup=markup, parse_mode="HTML"
         )
     
     else:
@@ -160,17 +158,17 @@ def process_user_access(message, user_id, first_name, username):
         lang = getattr(message.from_user, 'language_code', "Невідомо")
         
         notification_text = (
-            f"🔔 **Нова заявка на доступ!**\n\n"
-            f"👤 **Ім'я:** {full_name}\n"
-            f"🔗 **Юзернейм:** {mention}\n"
-            f"🆔 **ID:** `{user_id}`\n"
-            f"🌐 **Мова пристрою:** {lang}\n\n"
+            f"🔔 <b>Нова заявка на доступ!</b>\n\n"
+            f"👤 <b>Ім'я:</b> {full_name}\n"
+            f"🔗 <b>Юзернейм:</b> {mention}\n"
+            f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+            f"🌐 <b>Мова пристрою:</b> {lang}\n\n"
             f"👉 Зайдіть на сайт платформи (натисніть на 🔔 вгорі), щоб керувати доступом."
         )
         
         for admin_id in ADMIN_IDS:
             try:
-                bot.send_message(admin_id, notification_text, parse_mode="Markdown")
+                bot.send_message(admin_id, notification_text, parse_mode="HTML")
             except:
                 pass
 
@@ -186,27 +184,22 @@ def get_support_menu():
 
 @bot.message_handler(commands=['start', 'support'])
 def send_welcome(message):
-    # 1. ПЕРЕВІРКА НА ЗАПИТ ПІДТРИМКИ З САЙТУ
     if "support" in message.text or message.text == "/support":
         bot.send_message(
             message.chat.id, 
             "💬 Вітаємо в службі підтримки Hackademia! \n\nВиберіть тему з меню нижче або просто напишіть своє запитання сюди, і менеджер вам відповість.",
             reply_markup=get_support_menu()
         )
-        return # Зупиняємо функцію, щоб не вибивало помилку про скасований доступ
+        return
 
-    # 2. СТАНДАРТНА ЛОГІКА АВТОРИЗАЦІЇ
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
 
     process_user_access(message, user_id, first_name, username)
 
-    # 1. ЗАЛІЗОБЕТОННО: Спершу синхронізуємо юзера в базі та перевіряємо його статус
     try:
         response = supabase.table('users').select('*').eq('telegram_id', user_id).execute()
-        
-        # Якщо юзера ще немає в базі взагалі — створюємо зі статусом pending
         if not response.data:
             supabase.table('users').insert({
                 'telegram_id': user_id, 
@@ -217,17 +210,15 @@ def send_welcome(message):
             status = 'pending'
             send_email_alert(first_name, user_id)
         else:
-            # Якщо він є, оновлюємо юзернейм і забираємо поточний статус
             supabase.table('users').update({'username': username}).eq('telegram_id', user_id).execute()
             status = response.data[0].get('access_status', 'pending')
     except Exception as e:
         print(f"Помилка бази даних у /start: {e}")
         status = 'pending'
 
-
+# --- ВОРОНКА ПІДБОРУ НАВЧАННЯ ---
 @bot.message_handler(func=lambda message: message.text in ["📚 Підібрати навчання", "👨‍💻 Зв'язатися з менеджером", "📘 Дізнатися ціни", "🎓 Рівні та формати"])
 def handle_support_menu(message):
-    # Ловимо і нову кнопку, і старі (на випадок, якщо в когось залишилось старе меню)
     if message.text in ["📚 Підібрати навчання", "📘 Дізнатися ціни", "🎓 Рівні та формати"]:
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
@@ -238,9 +229,9 @@ def handle_support_menu(message):
         )
         bot.send_message(
             message.chat.id,
-            "Для того, щоб підібрати для вас найкращі умови, скажіть, **який рівень словацької мови вас цікавить?**",
+            "Для того, щоб підібрати для вас найкращі умови, скажіть, <b>який рівень словацької мови вас цікавить?</b>",
             reply_markup=markup,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     elif message.text == "👨‍💻 Зв'язатися з менеджером":
         markup = types.InlineKeyboardMarkup()
@@ -251,13 +242,12 @@ def handle_support_menu(message):
             reply_markup=markup
         )
 
-# ОБРОБКА ВИБОРУ РІВНЯ
 @bot.callback_query_handler(func=lambda call: call.data.startswith('lvl_'))
 def handle_level_selection(call):
     try: bot.answer_callback_query(call.id)
     except: pass
     
-    level = call.data.split('_')[1] # Отримуємо A1, A2 і т.д.
+    level = call.data.split('_')[1] 
     
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -266,15 +256,17 @@ def handle_level_selection(call):
     )
     markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_to_levels"))
     
-    bot.edit_message_text(
-        f"Ви обрали **Рівень {level}**.\n\nЯкий формат занять вам підходить найбільше?",
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
+    try:
+        bot.edit_message_text(
+            f"Ви обрали <b>Рівень {level}</b>.\n\nЯкий формат занять вам підходить найбільше?",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+    except Exception as e:
+        print(f"Помилка редагування: {e}")
 
-# ПОВЕРНЕННЯ НАЗАК ДО РІВНІВ
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_levels')
 def handle_back_to_levels(call):
     try: bot.answer_callback_query(call.id)
@@ -287,102 +279,92 @@ def handle_back_to_levels(call):
         types.InlineKeyboardButton("Рівень B1", callback_data="lvl_B1"),
         types.InlineKeyboardButton("Рівень B2", callback_data="lvl_B2")
     )
-    bot.edit_message_text(
-        "Для того, щоб підібрати для вас найкращі умови, скажіть, **який рівень словацької мови вас цікавить?**",
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
+    try:
+        bot.edit_message_text(
+            "Для того, щоб підібрати для вас найкращі умови, скажіть, <b>який рівень словацької мови вас цікавить?</b>",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+    except Exception as e:
+        print(f"Помилка редагування: {e}")
 
-# ОБРОБКА ВИБОРУ ФОРМАТУ ТА ВІДПРАВКА ЛІДА АДМІНУ
 @bot.callback_query_handler(func=lambda call: call.data.startswith('fmt_'))
 def handle_format_selection(call):
     try: bot.answer_callback_query(call.id)
     except: pass
     
-    # Розбираємо дані з кнопки (наприклад, fmt_A1_group)
     parts = call.data.split('_')
     level = parts[1]
     format_type = "Групові заняття" if parts[2] == "group" else "Індивідуальні заняття"
     
-    # 1. Формуємо ЛІД для адмінів
     first_name = call.from_user.first_name or ""
     last_name = call.from_user.last_name or ""
     full_name = f"{first_name} {last_name}".strip()
     username = f"@{call.from_user.username}" if call.from_user.username else "Не вказано (приховано)"
     
     admin_msg = (
-        f"🔥 **НОВИЙ ГАРЯЧИЙ ЛІД!**\n\n"
-        f"👤 **Учень:** {full_name}\n"
-        f"🔗 **Юзернейм:** {username}\n"
-        f"📊 **Цікавить рівень:** {level}\n"
-        f"🏫 **Формат:** {format_type}\n\n"
+        f"🔥 <b>НОВИЙ ГАРЯЧИЙ ЛІД!</b>\n\n"
+        f"👤 <b>Учень:</b> {full_name}\n"
+        f"🔗 <b>Юзернейм:</b> {username}\n"
+        f"📊 <b>Цікавить рівень:</b> {level}\n"
+        f"🏫 <b>Формат:</b> {format_type}\n\n"
         f"🆔 ID: {call.from_user.id}\n\n"
-        f"💬 _Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення._"
+        f"💬 <i>Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення.</i>"
     )
     
     for admin_id in ADMIN_IDS:
-        try: bot.send_message(admin_id, admin_msg, parse_mode="Markdown")
+        try: bot.send_message(admin_id, admin_msg, parse_mode="HTML")
         except: pass
         
-    # 2. Відповідаємо клієнту, закриваючи воронку
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("👨‍💻 Написати менеджеру зараз", url="https://t.me/xackademia"))
     
-    bot.edit_message_text(
-        f"✅ **Вашу заявку успішно прийнято!**\n\n"
-        f"Ви обрали:\n"
-        f"Курс: **Рівень {level}**\n"
-        f"Формат: **{format_type}**\n\n"
-        f"Наш менеджер зв'яжеться з вами найближчим часом, щоб надати актуальну інформацію щодо цін, розкладу та відповісти на всі питання.\n\n"
-        f"Якщо не хочете чекати, можете написати нам напряму 👇",
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
+    try:
+        bot.edit_message_text(
+            f"✅ <b>Вашу заявку успішно прийнято!</b>\n\n"
+            f"Ви обрали:\n"
+            f"Курс: <b>Рівень {level}</b>\n"
+            f"Формат: <b>{format_type}</b>\n\n"
+            f"Наш менеджер зв'яжеться з вами найближчим часом, щоб надати актуальну інформацію щодо цін, розкладу та відповісти на всі питання.\n\n"
+            f"Якщо не хочете чекати, можете написати нам напряму 👇",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+    except Exception as e:
+        print(f"Помилка редагування: {e}")
+# --- КІНЕЦЬ БЛОКУ ВОРОНКИ ---
 
-# Обробник кнопки "Я підписався"
 @bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
 def verify_sub_callback(call):
-    # 1. ЗАЛІЗОБЕТОННО: Гасимо коліщатко один раз на самому початку!
     try: bot.answer_callback_query(call.id)
     except: pass
     
     user_id = call.from_user.id
-    
-    # 2. Перевіряємо підписку
     if check_user_subscription(user_id):
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
+        try: bot.delete_message(call.message.chat.id, call.message.message_id)
+        except: pass
         process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
     else:
-        # Відправляємо текст у чат (щоб не конфліктувати з answer_callback_query)
         bot.send_message(call.message.chat.id, "❌ Ви ще не підписалися на всі канали! Підпишіться та спробуйте знову.")
 
-# Обробник кнопки "Надіслати запит повторно"
 @bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
 def handle_reapply(call):
-    # 1. ЗАЛІЗОБЕТОННО: Гасимо коліщатко один раз на самому початку!
     try: bot.answer_callback_query(call.id)
     except: pass
     
     user_id = call.from_user.id
-    
     try:
-        # 2. Перевіряємо підписку
         if not check_user_subscription(user_id):
             bot.send_message(call.message.chat.id, "❌ Підпишіться на канали перед подачею запиту!")
             send_subscription_prompt(call.message.chat.id)
             return
 
-        # 3. Оновлюємо статус в базі
         supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
         
-        # 4. Міняємо старе повідомлення, щоб кнопка зникла
         try:
             bot.edit_message_text(
                 "⏳ Ваш повторний запит надіслано адміністратору! Очікуйте підтвердження.", 
@@ -391,7 +373,6 @@ def handle_reapply(call):
             )
         except: pass
         
-        # 5. Формуємо сповіщення адмінам
         last_name = call.from_user.last_name or ""
         full_name = f"{call.from_user.first_name} {last_name}".strip()
         username = call.from_user.username
@@ -399,18 +380,16 @@ def handle_reapply(call):
         lang = getattr(call.from_user, 'language_code', "Невідомо")
         
         notification_text = (
-            f"🔔 **Повторна заявка на доступ!**\n\n"
-            f"👤 **Ім'я:** {full_name}\n"
-            f"🔗 **Юзернейм:** {mention}\n"
-            f"🆔 **ID:** `{user_id}`\n"
-            f"🌐 **Мова:** {lang}\n\n"
+            f"🔔 <b>Повторна заявка на доступ!</b>\n\n"
+            f"👤 <b>Ім'я:</b> {full_name}\n"
+            f"🔗 <b>Юзернейм:</b> {mention}\n"
+            f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
+            f"🌐 <b>Мова:</b> {lang}\n\n"
             f"👉 Зайдіть на сайт платформи, щоб надати доступ."
         )
         for admin_id in ADMIN_IDS:
-            try: 
-                bot.send_message(admin_id, notification_text, parse_mode="Markdown")
-            except: 
-                pass
+            try: bot.send_message(admin_id, notification_text, parse_mode="HTML")
+            except: pass
                 
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Виникла помилка під час обробки: {e}")
@@ -422,7 +401,7 @@ def manual_add_user(message):
     try:
         parts = message.text.split(maxsplit=2)
         if len(parts) < 2:
-            bot.reply_to(message, "✍️ **Використання:** `/add ID [Ім'я]`", parse_mode="Markdown")
+            bot.reply_to(message, "✍️ <b>Використання:</b> <code>/add ID [Ім'я]</code>", parse_mode="HTML")
             return
             
         target_id = int(parts[1])
@@ -430,17 +409,15 @@ def manual_add_user(message):
         
         resp = supabase.table('users').select('*').eq('telegram_id', target_id).execute()
         if resp.data:
-            # ДОДАНО: needs_course_assignment: True
             supabase.table('users').update({'access_status': 'approved', 'first_name': name, 'needs_course_assignment': True}).eq('telegram_id', target_id).execute()
         else:
-            # ДОДАНО: needs_course_assignment: True
             supabase.table('users').insert({'telegram_id': target_id, 'first_name': name, 'access_status': 'approved', 'needs_course_assignment': True}).execute()
             
-        bot.reply_to(message, f"✅ Учня `{target_id}` успішно додано! На сайті з'явиться нагадування про вибір курсу.", parse_mode="Markdown")
+        bot.reply_to(message, f"✅ Учня <code>{target_id}</code> успішно додано! На сайті з'явиться нагадування про вибір курсу.", parse_mode="HTML")
         try:
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
-            bot.send_message(target_id, "🎉 **Адміністратор надав вам доступ!**\n\nТепер ви можете користуватися платформою.", reply_markup=markup, parse_mode="Markdown")
+            bot.send_message(target_id, "🎉 <b>Адміністратор надав вам доступ!</b>\n\nТепер ви можете користуватися платформою.", reply_markup=markup, parse_mode="HTML")
         except:
             pass
     except Exception as e:
@@ -448,7 +425,6 @@ def manual_add_user(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
 def handle_access_decision(call):
-    # Одразу гасимо коліщатко
     try: bot.answer_callback_query(call.id)
     except: pass
 
@@ -461,18 +437,17 @@ def handle_access_decision(call):
         target_user_id = int(target_user_id)
 
         if action == 'approve':
-            # ДОДАНО: needs_course_assignment: True
             supabase.table('users').update({'access_status': 'approved', 'needs_course_assignment': True}).eq('telegram_id', target_user_id).execute()
-            bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n✅ Рішення: **СХВАЛЕНО**\n(На сайті з'явиться нагадування про курси)", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
+            bot.edit_message_text(text=f"🔔 Запит від ID <code>{target_user_id}</code>\n\n✅ Рішення: <b>СХВАЛЕНО</b>\n(На сайті з'явиться нагадування про курси)", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=None)
             try:
                 markup = types.InlineKeyboardMarkup()
                 markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
-                bot.send_message(target_user_id, "🎉 **Вашу заявку схвалено!**\n\nТепер ви маєте повний доступ до платформи.", reply_markup=markup, parse_mode="Markdown")
+                bot.send_message(target_user_id, "🎉 <b>Вашу заявку схвалено!</b>\n\nТепер ви маєте повний доступ до платформи.", reply_markup=markup, parse_mode="HTML")
             except: pass
                 
         elif action == 'reject':
             supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
-            bot.edit_message_text(text=f"🔔 Запит від ID `{target_user_id}`\n\n❌ Рішення: **ВІДХИЛЕНО**", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="Markdown", reply_markup=None)
+            bot.edit_message_text(text=f"🔔 Запит від ID <code>{target_user_id}</code>\n\n❌ Рішення: <b>ВІДХИЛЕНО</b>", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=None)
             try: 
                 bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
             except: pass
@@ -494,11 +469,10 @@ def manage_users(message):
         uid = u.get('telegram_id')
         if uid not in ADMIN_IDS:
             markup.add(types.InlineKeyboardButton(f"❌ Забрати доступ: {name}", callback_data=f"revoke_{uid}"))
-    bot.send_message(message.chat.id, "👥 **Схвалені користувачі:**", reply_markup=markup)
+    bot.send_message(message.chat.id, "👥 <b>Схвалені користувачі:</b>", reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('revoke_'))
 def handle_revoke(call):
-    # Одразу гасимо коліщатко
     try: bot.answer_callback_query(call.id)
     except: pass
 
@@ -538,28 +512,24 @@ def handle_photo(message):
         file_info = bot.get_file(file_id)
         direct_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_info.file_path}"
         bot.forward_message(LOG_CHANNEL_ID, message.chat.id, message.message_id)
-        bot.reply_to(message, f"✅ Картинку оброблено!\n\n**Пряме посилання:**\n`{direct_url}`", parse_mode="Markdown")
+        bot.reply_to(message, f"✅ Картинку оброблено!\n\n<b>Пряме посилання:</b>\n<code>{direct_url}</code>", parse_mode="HTML")
     except: pass
 
 # ОБРОБКА ВІДПОВІДЕЙ АДМІНА ЧЕРЕЗ БОТА
 @bot.message_handler(func=lambda message: message.reply_to_message is not None and message.from_user.id in ADMIN_IDS, content_types=['text', 'photo', 'document', 'audio', 'voice', 'video'])
 def handle_admin_reply(message):
-    # Отримуємо текст оригінального повідомлення-заявки
     original_text = message.reply_to_message.text or message.reply_to_message.caption
     
     if original_text and "ID:" in original_text:
         try:
-            # Шукаємо ID учня у тексті заявки (формат "ID: 123456789")
             user_id_match = re.search(r'ID:\s*(\d+)', original_text)
             if user_id_match:
                 target_user_id = int(user_id_match.group(1))
                 
-                # Якщо адмін відповів текстом
                 if message.content_type == 'text':
-                    bot.send_message(target_user_id, f"👨‍💻 **Відповідь від менеджера:**\n\n{message.text}", parse_mode="Markdown")
-                # Якщо адмін відповів фото/відео/голосовим
+                    bot.send_message(target_user_id, f"👨‍💻 <b>Відповідь від менеджера:</b>\n\n{message.text}", parse_mode="HTML")
                 else:
-                    bot.send_message(target_user_id, "👨‍💻 **Відповідь від менеджера:**", parse_mode="Markdown")
+                    bot.send_message(target_user_id, "👨‍💻 <b>Відповідь від менеджера:</b>", parse_mode="HTML")
                     bot.copy_message(target_user_id, message.chat.id, message.message_id)
                 
                 bot.reply_to(message, "✅ Відповідь успішно надіслана учню!")
@@ -570,16 +540,14 @@ def handle_admin_reply(message):
 
 @bot.message_handler(func=lambda message: True, content_types=['text', 'document', 'audio', 'photo', 'video'])
 def handle_all_other_messages(message):
-    # 1. ЯКЩО ЦЕ АДМІН (зберігаємо в кеш-канал)
     if message.from_user.id in ADMIN_IDS:
         if message.content_type == 'text' and message.text.startswith('/'):
-            return # Ігноруємо команди, бо вони обробляються вище
+            return 
         try:
             bot.forward_message(LOG_CHANNEL_ID, message.chat.id, message.message_id)
             bot.reply_to(message, "💾 Зарезервовано в кеш-каналі!")
         except: pass
         
-    # 2. ЯКЩО ЦЕ УЧЕНЬ ПИШЕ В ПІДТРИМКУ
     else:
         first_name = message.from_user.first_name or ""
         last_name = message.from_user.last_name or ""
@@ -587,29 +555,25 @@ def handle_all_other_messages(message):
         username = f"@{message.from_user.username}" if message.from_user.username else "Не вказано"
         user_id = message.from_user.id
         
-        # Визначаємо текст повідомлення або тип файлу
         text = message.text if message.content_type == 'text' else f"📁 Надіслав медіафайл ({message.content_type})"
 
         notification_text = (
-            f"📩 **НОВЕ ПОВІДОМЛЕННЯ ВІД УЧНЯ (ЧЕРЕЗ БОТА)**\n\n"
-            f"👤 **Учень:** {full_name}\n"
-            f"🔗 **Юзернейм:** {username}\n"
+            f"📩 <b>НОВЕ ПОВІДОМЛЕННЯ ВІД УЧНЯ (ЧЕРЕЗ БОТА)</b>\n\n"
+            f"👤 <b>Учень:</b> {full_name}\n"
+            f"🔗 <b>Юзернейм:</b> {username}\n"
             f"🆔 ID: {user_id}\n\n"
-            f"💬 **Текст:**\n{text}\n\n"
-            f"💬 _Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення._"
+            f"💬 <b>Текст:</b>\n{text}\n\n"
+            f"💬 <i>Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення.</i>"
         )
 
-        # Відправляємо заявку всім адмінам
         for admin_id in ADMIN_IDS:
             try:
-                bot.send_message(admin_id, notification_text, parse_mode="Markdown")
-                # Якщо учень скинув фото/файл, пересилаємо його адміну теж
+                bot.send_message(admin_id, notification_text, parse_mode="HTML")
                 if message.content_type != 'text':
                      bot.forward_message(admin_id, message.chat.id, message.message_id)
             except:
                 pass
         
-        # Відповідаємо учню, щоб він розумів, що його почули
         bot.reply_to(message, "✅ Ваше повідомлення успішно надіслано в службу підтримки. Менеджер незабаром вам відповість!")
 
 # Універсальний обробник
