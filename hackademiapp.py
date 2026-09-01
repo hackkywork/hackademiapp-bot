@@ -225,7 +225,8 @@ def handle_support_menu(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('lvl_'))
 def handle_level_selection(call):
-    bot.answer_callback_query(call.id)
+    try: bot.answer_callback_query(call.id)
+    except: pass
     
     level = call.data.split('_')[1] 
     
@@ -249,7 +250,8 @@ def handle_level_selection(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_levels')
 def handle_back_to_levels(call):
-    bot.answer_callback_query(call.id)
+    try: bot.answer_callback_query(call.id)
+    except: pass
     
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -271,7 +273,8 @@ def handle_back_to_levels(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('fmt_'))
 def handle_format_selection(call):
-    bot.answer_callback_query(call.id)
+    try: bot.answer_callback_query(call.id)
+    except: pass
     
     parts = call.data.split('_')
     level = parts[1]
@@ -318,7 +321,8 @@ def handle_format_selection(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
 def handle_reapply(call):
-    bot.answer_callback_query(call.id)
+    try: bot.answer_callback_query(call.id)
+    except: pass
     
     user_id = call.from_user.id
     try:
@@ -384,7 +388,8 @@ def manual_add_user(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
 def handle_access_decision(call):
-    bot.answer_callback_query(call.id)
+    try: bot.answer_callback_query(call.id)
+    except: pass
 
     if call.from_user.id not in ADMIN_IDS:
         bot.send_message(call.message.chat.id, "❌ У вас немає прав!")
@@ -431,7 +436,8 @@ def manage_users(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('revoke_'))
 def handle_revoke(call):
-    bot.answer_callback_query(call.id)
+    try: bot.answer_callback_query(call.id)
+    except: pass
 
     if call.from_user.id not in ADMIN_IDS:
         bot.send_message(call.message.chat.id, "❌ Немає прав!")
@@ -536,7 +542,8 @@ def handle_all_other_messages(message):
 # Універсальний обробник
 @bot.callback_query_handler(func=lambda call: True)
 def catch_all_callbacks(call):
-    bot.answer_callback_query(call.id)
+    try: bot.answer_callback_query(call.id)
+    except: pass
 
 if __name__ == '__main__':
     keep_alive()
