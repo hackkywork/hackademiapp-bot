@@ -184,37 +184,46 @@ def get_support_menu():
 
 @bot.message_handler(commands=['start', 'support'])
 def send_welcome(message):
-    if "support" in message.text or message.text == "/support":
-        bot.send_message(
-            message.chat.id, 
-            "💬 Вітаємо в службі підтримки Hackademia! \n\nВиберіть тему з меню нижче або просто напишіть своє запитання сюди, і менеджер вам відповість.",
-            reply_markup=get_support_menu()
-        )
-        return
-
     user_id = message.from_user.id
     username = message.from_user.username
     first_name = message.from_user.first_name
+    
+    # 1. ОБРОБКА ПЕРЕХОДУ З САЙТУ З ПИТАННЯМ (PIN)
+    if message.text.startswith('/start pin_'):
+        pin = message.text.split('pin_')[1]
+        username_str = f"@{username}" if username else "Не вказано (приховано)"
+        full_name = f"{first_name} {message.from_user.last_name or ''}".strip()
+        
+        admin_msg = (
+            f"✅ <b>ЛІД ЗНАЙШОВСЯ! (PIN: {pin})</b>\n\n"
+            f"Той, хто щойно залишив питання на сайті, це:\n"
+            f"👤 <b>Учень:</b> {full_name}\n"
+            f"🔗 <b>Юзернейм:</b> {username_str}\n"
+            f"🆔 ID: {user_id}\n\n"
+            f"💬 <i>Зробіть Reply (Відповісти) на це повідомлення, щоб написати йому!</i>"
+        )
+        for admin in ADMIN_IDS:
+            try: bot.send_message(admin, admin_msg, parse_mode="HTML")
+            except: pass
+        
+        bot.send_message(
+            message.chat.id, 
+            "✅ <b>Ми успішно отримали ваше запитання з сайту!</b>\nМенеджер вже читає його і незабаром відповість.\n\nА поки що, ви можете скористатися меню нижче:",
+            reply_markup=get_support_menu(),
+            parse_mode="HTML"
+        )
+        process_user_access(message, user_id, first_name, username)
+        return
 
-    process_user_access(message, user_id, first_name, username)
-
-    try:
-        response = supabase.table('users').select('*').eq('telegram_id', user_id).execute()
-        if not response.data:
-            supabase.table('users').insert({
-                'telegram_id': user_id, 
-                'first_name': first_name,
-                'username': username,
-                'access_status': 'pending'
-            }).execute()
-            status = 'pending'
-            send_email_alert(first_name, user_id)
-        else:
-            supabase.table('users').update({'username': username}).eq('telegram_id', user_id).execute()
-            status = response.data[0].get('access_status', 'pending')
-    except Exception as e:
-        print(f"Помилка бази даних у /start: {e}")
-        status = 'pending'
+    # 2. ПЕРЕВІРКА НА ЗВИЧАЙНИЙ ЗАПИТ ПІДТРИМКИ АБО СТАНДАРТНИЙ СТАРТ
+    if "support" in message.text or message.text in ["/support", "/start"]:
+        bot.send_message(
+            message.chat.id, 
+            "💬 Вітаємо в службі підтримки Hackademia! \n\nВиберіть тему з меню нижче або просто напишіть своє запитання сюди.",
+            reply_markup=get_support_menu()
+        )
+        process_user_access(message, user_id, first_name, username)
+        return
 
 # --- ВОРОНКА ПІДБОРУ НАВЧАННЯ ---
 @bot.message_handler(func=lambda message: message.text in ["📚 Підібрати навчання", "👨‍💻 Зв'язатися з менеджером", "📘 Дізнатися ціни", "🎓 Рівні та формати"])
