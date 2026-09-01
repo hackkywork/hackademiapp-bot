@@ -188,35 +188,25 @@ def send_welcome(message):
     username = message.from_user.username
     first_name = message.from_user.first_name
     
-    # 1. ОБРОБКА ПЕРЕХОДУ З САЙТУ З ПИТАННЯМ (PIN)
-    if message.text.startswith('/start pin_'):
-        pin = message.text.split('pin_')[1]
+    # 1. ОБРОБКА ПЕРЕХОДУ З САЙТУ (Миттєве сповіщення адміну)
+    if message.text == '/start support' or message.text == '/support':
         username_str = f"@{username}" if username else "Не вказано (приховано)"
-        full_name = f"{first_name} {message.from_user.last_name or ''}".strip()
+        last_name = message.from_user.last_name or ""
+        full_name = f"{first_name} {last_name}".strip()
         
+        # Миттєвий перехват ліда
         admin_msg = (
-            f"✅ <b>ЛІД ЗНАЙШОВСЯ! (PIN: {pin})</b>\n\n"
-            f"Той, хто щойно залишив питання на сайті, це:\n"
+            f"🔥 <b>НОВИЙ ЛІД У БОТІ! (Щойно зайшов з сайту)</b>\n\n"
+            f"<i>Людина відкрила бота через віджет підтримки. Вона ще нічого не написала, але ви вже маєте її контакт:</i>\n\n"
             f"👤 <b>Учень:</b> {full_name}\n"
             f"🔗 <b>Юзернейм:</b> {username_str}\n"
-            f"🆔 ID: {user_id}\n\n"
-            f"💬 <i>Зробіть Reply (Відповісти) на це повідомлення, щоб написати йому!</i>"
+            f"🆔 <b>ID:</b> <code>{user_id}</code>\n\n"
+            f"💬 <i>(Якщо вона обере курс або напише питання, ви отримаєте додаткове сповіщення з текстом)</i>"
         )
         for admin in ADMIN_IDS:
             try: bot.send_message(admin, admin_msg, parse_mode="HTML")
             except: pass
-        
-        bot.send_message(
-            message.chat.id, 
-            "✅ <b>Ми успішно отримали ваше запитання з сайту!</b>\nМенеджер вже читає його і незабаром відповість.\n\nА поки що, ви можете скористатися меню нижче:",
-            reply_markup=get_support_menu(),
-            parse_mode="HTML"
-        )
-        process_user_access(message, user_id, first_name, username)
-        return
-
-    # 2. ПЕРЕВІРКА НА ЗВИЧАЙНИЙ ЗАПИТ ПІДТРИМКИ АБО СТАНДАРТНИЙ СТАРТ
-    if "support" in message.text or message.text in ["/support", "/start"]:
+            
         bot.send_message(
             message.chat.id, 
             "💬 Вітаємо в службі підтримки Hackademia! \n\nВиберіть тему з меню нижче або просто напишіть своє запитання сюди.",
@@ -224,6 +214,19 @@ def send_welcome(message):
         )
         process_user_access(message, user_id, first_name, username)
         return
+
+    # 2. ПЕРЕВІРКА НА ЗАПИТ ПІДТРИМКИ (ЗІ СТАРИМ ПІН-КОДОМ)
+    if message.text.startswith('/start pin_'):
+        bot.send_message(
+            message.chat.id, 
+            "💬 Вітаємо в службі підтримки Hackademia! \n\nВиберіть тему з меню нижче або просто напишіть своє запитання сюди.",
+            reply_markup=get_support_menu()
+        )
+        process_user_access(message, user_id, first_name, username)
+        return
+
+    # 3. СТАНДАРТНА ЛОГІКА АВТОРИЗАЦІЇ (Простий /start)
+    process_user_access(message, user_id, first_name, username)
 
 # --- ВОРОНКА ПІДБОРУ НАВЧАННЯ ---
 @bot.message_handler(func=lambda message: message.text in ["📚 Підібрати навчання", "👨‍💻 Зв'язатися з менеджером", "📘 Дізнатися ціни", "🎓 Рівні та формати"])
