@@ -173,13 +173,26 @@ def process_user_access(message, user_id, first_name, username):
             except:
                 pass
 
+def get_support_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(
+        types.KeyboardButton("📘 Дізнатися ціни"),
+        types.KeyboardButton("🎓 Рівні та формати")
+    )
+    markup.add(types.KeyboardButton("👨‍💻 Зв'язатися з менеджером"))
+    return markup
+
 # ----------------- ОБРОБНИКИ КОМАНД І КНОПОК -----------------
 
 @bot.message_handler(commands=['start', 'support'])
 def send_welcome(message):
     # 1. ПЕРЕВІРКА НА ЗАПИТ ПІДТРИМКИ З САЙТУ
     if "support" in message.text or message.text == "/support":
-        bot.send_message(message.chat.id, "💬 Вітаємо в службі підтримки! Ми на зв'язку. Напишіть ваше питання сюди, і менеджер скоро вам відповість.")
+        bot.send_message(
+            message.chat.id, 
+            "💬 Вітаємо в службі підтримки Hackademia! \n\nВиберіть тему з меню нижче або просто напишіть своє запитання сюди, і менеджер вам відповість.",
+            reply_markup=get_support_menu()
+        )
         return # Зупиняємо функцію, щоб не вибивало помилку про скасований доступ
 
     # 2. СТАНДАРТНА ЛОГІКА АВТОРИЗАЦІЇ
@@ -211,6 +224,53 @@ def send_welcome(message):
         print(f"Помилка бази даних у /start: {e}")
         status = 'pending'
 
+
+@bot.message_handler(func=lambda message: message.text in ["📘 Дізнатися ціни", "🎓 Рівні та формати", "👨‍💻 Зв'язатися з менеджером"])
+def handle_support_menu(message):
+    if message.text in ["📘 Дізнатися ціни", "🎓 Рівні та формати"]:
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("Група А1 / А2", callback_data="price_a1a2"),
+            types.InlineKeyboardButton("Група B1", callback_data="price_b1"),
+            types.InlineKeyboardButton("Індивідуальні заняття", callback_data="price_ind"),
+            types.InlineKeyboardButton("👨‍💻 Написати менеджеру", url="https://t.me/xackademia")
+        )
+        bot.send_message(
+            message.chat.id,
+            "Вартість та формат навчання залежать від вашого поточного рівня. Що саме вас цікавить?",
+            reply_markup=markup
+        )
+    elif message.text == "👨‍💻 Зв'язатися з менеджером":
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("Написати менеджеру 📝", url="https://t.me/xackademia"))
+        bot.send_message(
+            message.chat.id,
+            "Натисніть кнопку нижче, щоб перейти в особистий чат з адміністратором платформи:",
+            reply_markup=markup
+        )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('price_'))
+def handle_price_callbacks(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("👨‍💻 Уточнити ціну / Записатися", url="https://t.me/xackademia"))
+
+    if call.data == "price_a1a2":
+        text = "📚 **Група А1 / А2 (до 6 осіб)**\n\n- 16 занять (2 місяці)\n- 2 рази на тиждень по 1.5 год\n\nЧудовий старт у дружній атмосфері! Для уточнення актуальної ціни та розкладу напишіть менеджеру."
+    elif call.data == "price_b1":
+        text = "📘 **Група B1 (Популярний)**\n\n- 24 заняття (~2.5 місяці)\n- 2 рази на тиждень по 1.5 год\n\nПоглиблене вивчення для тих, хто вже має базу. Для уточнення ціни та наявності місць напишіть нам."
+    elif call.data == "price_ind":
+        text = "🎯 **Індивідуально (1 особа або пара)**\n\n- Власний гнучкий графік\n- 100% уваги викладача\n- Повна адаптація під ваші цілі\n\nНапишіть менеджеру, щоб узгодити графік та прорахувати вартість."
+
+    bot.edit_message_text(
+        text, 
+        chat_id=call.message.chat.id, 
+        message_id=call.message.message_id, 
+        parse_mode="Markdown", 
+        reply_markup=markup
+    )
 
 # Обробник кнопки "Я підписався"
 @bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
