@@ -16,6 +16,9 @@ TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_IDS = [597686904, 5604755902]  # Адміни
 LOG_CHANNEL_ID = -1001240560482  # Кеш-канал
 
+# Обов'язкові канали для підписки
+REQUIRED_CHANNELS = ["@hackslovak", "@hackslovak_blog"]
+
 # Налаштування Пошти
 GMAIL_ACCOUNT = "hackslovak@gmail.com"
 GMAIL_PASSWORD = os.getenv('GMAIL_PASSWORD')
@@ -78,6 +81,34 @@ def scheduled_backup_job():
 scheduler = BackgroundScheduler()
 scheduler.add_job(scheduled_backup_job, 'cron', hour=3, minute=0)
 scheduler.start()
+
+# ----------------- ПЕРЕВІРКА ПІДПИСОК -----------------
+
+def check_user_subscription(user_id):
+    if user_id in ADMIN_IDS:
+        return True
+    for channel in REQUIRED_CHANNELS:
+        try:
+            stat = bot.get_chat_member(channel, user_id).status
+            if stat in ['left', 'kicked']:
+                return False
+        except Exception as e:
+            print(f"Помилка перевірки підписки для {channel}: {e}")
+            return False
+    return True
+
+def send_subscription_prompt(chat_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("📢 Канал HackSlovak", url="https://t.me/hackslovak"),
+        types.InlineKeyboardButton("📝 Блог HackSlovak", url="https://t.me/hackslovak_blog"),
+        types.InlineKeyboardButton("✅ Я підписався", callback_data="check_subscription")
+    )
+    bot.send_message(
+        chat_id, 
+        "👋 <b>Привіт!</b>\n\nЩоб користуватися платформою Hackademia, необхідно бути підписаним на наші канали.\n\nПідпишіться та натисніть кнопку нижче 👇", 
+        reply_markup=markup, parse_mode="HTML"
+    )
 
 # ----------------- ЛОГІКА ДОСТУПУ -----------------
 
@@ -149,32 +180,6 @@ def get_support_menu():
     )
     return markup
 
-def sync_user_in_db(user_id, first_name, username):
-    try:
-        response = supabase.table('users').select('*').eq('telegram_id', user_id).execute()
-        if not response.data:
-            supabase.table('users').insert({
-                'telegram_id': user_id, 
-                'first_name': first_name,
-                'username': username,
-                'access_status': 'pending'
-            }).execute()
-            send_email_alert(first_name, user_id)
-            return 'pending', True
-        else:
-            supabase.table('users').update({'username': username}).eq('telegram_id', user_id).execute()
-            return response.data[0].get('access_status', 'pending'), False
-    except Exception as e:
-        print(f"Помилка БД: {e}")
-        return 'pending', False
-
-def get_main_menu(is_approved=False):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
-    if is_approved:
-        markup.add(types.KeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app/app")))
-    markup.add(types.KeyboardButton("📚 Підібрати навчання"))
-    return markup
-
 # ----------------- ОБРОБНИКИ КОМАНД І КНОПОК -----------------
 
 @bot.message_handler(commands=['start', 'support'])
@@ -183,16 +188,20 @@ def send_welcome(message):
     username = message.from_user.username
     first_name = message.from_user.first_name
     
+    # 1. ОБРОБКА ПЕРЕХОДУ З САЙТУ (Миттєве сповіщення адміну)
     if message.text == '/start support' or message.text == '/support':
         username_str = f"@{username}" if username else "Не вказано (приховано)"
         last_name = message.from_user.last_name or ""
         full_name = f"{first_name} {last_name}".strip()
         
+        # Миттєвий перехват ліда
         admin_msg = (
             f"🔥 <b>НОВИЙ ЛІД У БОТІ! (Щойно зайшов з сайту)</b>\n\n"
+            f"<i>Людина відкрила бота через віджет підтримки. Вона ще нічого не написала, але ви вже маєте її контакт:</i>\n\n"
             f"👤 <b>Учень:</b> {full_name}\n"
             f"🔗 <b>Юзернейм:</b> {username_str}\n"
-            f"🆔 <b>ID:</b> <code>{user_id}</code>"
+            f"🆔 <b>ID:</b> <code>{user_id}</code>\n\n"
+            f"💬 <i>(Якщо вона обере курс або напише питання, ви отримаєте додаткове сповіщення з текстом)</i>"
         )
         for admin in ADMIN_IDS:
             try: bot.send_message(admin, admin_msg, parse_mode="HTML")
@@ -206,7 +215,8 @@ def send_welcome(message):
         process_user_access(message, user_id, first_name, username)
         return
 
-    if message.text and message.text.startswith('/start pin_'):
+    # 2. ПЕРЕВІРКА НА ЗАПИТ ПІДТРИМКИ (ЗІ СТАРИМ ПІН-КОДОМ)
+    if message.text.startswith('/start pin_'):
         bot.send_message(
             message.chat.id, 
             "💬 Вітаємо в службі підтримки Hackademia! \n\nВиберіть тему з меню нижче або просто напишіть своє запитання сюди.",
@@ -215,55 +225,13 @@ def send_welcome(message):
         process_user_access(message, user_id, first_name, username)
         return
 
+    # 3. СТАНДАРТНА ЛОГІКА АВТОРИЗАЦІЇ (Простий /start)
     process_user_access(message, user_id, first_name, username)
 
-# Текстова кнопка воронки
+# --- ВОРОНКА ПІДБОРУ НАВЧАННЯ ---
 @bot.message_handler(func=lambda message: message.text in ["📚 Підібрати навчання", "👨‍💻 Зв'язатися з менеджером", "📘 Дізнатися ціни", "🎓 Рівні та формати"])
 def handle_support_menu(message):
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("Рівень A1", callback_data="lvl_A1"),
-        types.InlineKeyboardButton("Рівень A2", callback_data="lvl_A2"),
-        types.InlineKeyboardButton("Рівень B1", callback_data="lvl_B1"),
-        types.InlineKeyboardButton("Рівень B2", callback_data="lvl_B2")
-    )
-    bot.send_message(
-        message.chat.id,
-        "Для того, щоб підібрати для вас найкращі умови, скажіть, <b>який рівень словацької мови вас цікавить?</b>",
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
-
-# --- ЦЕНТРАЛЬНИЙ РОУТЕР ДЛЯ ВСІХ ІНЛАЙН-КНОПОК ---
-@bot.callback_query_handler(func=lambda call: True)
-def global_callback_router(call):
-    try:
-        bot.answer_callback_query(call.id)
-    except Exception:
-        pass
-    
-    data = call.data
-    chat_id = call.message.chat.id
-    message_id = call.message.message_id
-    user_id = call.from_user.id
-
-    if data.startswith('lvl_'):
-        level = data.split('_')[1]
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("👥 Групові", callback_data=f"fmt_{level}_group"),
-            types.InlineKeyboardButton("🎯 Індивідуальні", callback_data=f"fmt_{level}_ind")
-        )
-        markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_to_levels"))
-        try:
-            bot.edit_message_text(
-                f"Ви обрали <b>Рівень {level}</b>.\n\nЯкий формат занять вам підходить найбільше?",
-                chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=markup
-            )
-        except Exception as e:
-            print(f"Помилка редагування рівня: {e}")
-
-    elif data == 'back_to_levels':
+    if message.text in ["📚 Підібрати навчання", "📘 Дізнатися ціни", "🎓 Рівні та формати"]:
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
             types.InlineKeyboardButton("Рівень A1", callback_data="lvl_A1"),
@@ -271,52 +239,150 @@ def global_callback_router(call):
             types.InlineKeyboardButton("Рівень B1", callback_data="lvl_B1"),
             types.InlineKeyboardButton("Рівень B2", callback_data="lvl_B2")
         )
-        try:
-            bot.edit_message_text(
-                "Для того, щоб підібрати для вас найкращі умови, скажіть, <b>який рівень словацької мови вас цікавить?</b>",
-                chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=markup
-            )
-        except Exception as e:
-            print(f"Помилка повернення: {e}")
-
-    elif data.startswith('fmt_'):
-        parts = data.split('_')
-        level = parts[1]
-        format_type = "Групові заняття" if parts[2] == "group" else "Індивідуальні заняття"
-        
-        first_name = call.from_user.first_name or ""
-        last_name = call.from_user.last_name or ""
-        full_name = f"{first_name} {last_name}".strip()
-        username = f"@{call.from_user.username}" if call.from_user.username else "Не вказано (приховано)"
-        
-        admin_msg = (
-            f"🔥 <b>НОВИЙ ГАРЯЧИЙ ЛІД!</b>\n\n"
-            f"👤 <b>Учень:</b> {full_name}\n"
-            f"🔗 <b>Юзернейм:</b> {username}\n"
-            f"📊 <b>Цікавить рівень:</b> {level}\n"
-            f"🏫 <b>Формат:</b> {format_type}\n\n"
-            f"🆔 ID: <code>{user_id}</code>\n\n"
-            f"💬 <i>Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення.</i>"
+        bot.send_message(
+            message.chat.id,
+            "Для того, щоб підібрати для вас найкращі умови, скажіть, <b>який рівень словацької мови вас цікавить?</b>",
+            reply_markup=markup,
+            parse_mode="HTML"
         )
-        for admin_id in ADMIN_IDS:
-            try: bot.send_message(admin_id, admin_msg, parse_mode="HTML")
-            except: pass
-            
+    elif message.text == "👨‍💻 Зв'язатися з менеджером":
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("Написати менеджеру 📝", url="https://t.me/xackademia"))
+        bot.send_message(
+            message.chat.id,
+            "Натисніть кнопку нижче, щоб перейти в особистий чат з адміністратором платформи:",
+            reply_markup=markup
+        )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('lvl_'))
+def handle_level_selection(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
+    level = call.data.split('_')[1] 
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("👥 Групові", callback_data=f"fmt_{level}_group"),
+        types.InlineKeyboardButton("🎯 Індивідуальні", callback_data=f"fmt_{level}_ind")
+    )
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="back_to_levels"))
+    
+    try:
+        bot.edit_message_text(
+            f"Ви обрали <b>Рівень {level}</b>.\n\nЯкий формат занять вам підходить найбільше?",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+    except Exception as e:
+        print(f"Помилка редагування: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data == 'back_to_levels')
+def handle_back_to_levels(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("Рівень A1", callback_data="lvl_A1"),
+        types.InlineKeyboardButton("Рівень A2", callback_data="lvl_A2"),
+        types.InlineKeyboardButton("Рівень B1", callback_data="lvl_B1"),
+        types.InlineKeyboardButton("Рівень B2", callback_data="lvl_B2")
+    )
+    try:
+        bot.edit_message_text(
+            "Для того, щоб підібрати для вас найкращі умови, скажіть, <b>який рівень словацької мови вас цікавить?</b>",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+    except Exception as e:
+        print(f"Помилка редагування: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('fmt_'))
+def handle_format_selection(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
+    parts = call.data.split('_')
+    level = parts[1]
+    format_type = "Групові заняття" if parts[2] == "group" else "Індивідуальні заняття"
+    
+    first_name = call.from_user.first_name or ""
+    last_name = call.from_user.last_name or ""
+    full_name = f"{first_name} {last_name}".strip()
+    username = f"@{call.from_user.username}" if call.from_user.username else "Не вказано (приховано)"
+    
+    admin_msg = (
+        f"🔥 <b>НОВИЙ ГАРЯЧИЙ ЛІД!</b>\n\n"
+        f"👤 <b>Учень:</b> {full_name}\n"
+        f"🔗 <b>Юзернейм:</b> {username}\n"
+        f"📊 <b>Цікавить рівень:</b> {level}\n"
+        f"🏫 <b>Формат:</b> {format_type}\n\n"
+        f"🆔 ID: {call.from_user.id}\n\n"
+        f"💬 <i>Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення.</i>"
+    )
+    
+    for admin_id in ADMIN_IDS:
+        try: bot.send_message(admin_id, admin_msg, parse_mode="HTML")
+        except: pass
+        
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("👨‍💻 Написати менеджеру зараз", url="https://t.me/xackademia"))
+    
+    try:
+        bot.edit_message_text(
+            f"✅ <b>Вашу заявку успішно прийнято!</b>\n\n"
+            f"Ви обрали:\n"
+            f"Курс: <b>Рівень {level}</b>\n"
+            f"Формат: <b>{format_type}</b>\n\n"
+            f"Наш менеджер зв'яжеться з вами найближчим часом, щоб надати актуальну інформацію щодо цін, розкладу та відповісти на всі питання.\n\n"
+            f"Якщо не хочете чекати, можете написати нам напряму 👇",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
+    except Exception as e:
+        print(f"Помилка редагування: {e}")
+# --- КІНЕЦЬ БЛОКУ ВОРОНКИ ---
+
+@bot.callback_query_handler(func=lambda call: call.data == 'check_subscription')
+def verify_sub_callback(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
+    user_id = call.from_user.id
+    if check_user_subscription(user_id):
+        try: bot.delete_message(call.message.chat.id, call.message.message_id)
+        except: pass
+        process_user_access(call.message, user_id, call.from_user.first_name, call.from_user.username)
+    else:
+        bot.send_message(call.message.chat.id, "❌ Ви ще не підписалися на всі канали! Підпишіться та спробуйте знову.")
+
+@bot.callback_query_handler(func=lambda call: call.data == 'reapply_access')
+def handle_reapply(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+    
+    user_id = call.from_user.id
+    try:
+        if not check_user_subscription(user_id):
+            bot.send_message(call.message.chat.id, "❌ Підпишіться на канали перед подачею запиту!")
+            send_subscription_prompt(call.message.chat.id)
+            return
+
+        supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
+        
         try:
             bot.edit_message_text(
-                f"✅ <b>Вашу заявку успішно прийнято!</b>\n\n"
-                f"Ви обрали:\n"
-                f"Курс: <b>Рівень {level}</b>\n"
-                f"Формат: <b>{format_type}</b>\n\n"
-                f"Наш менеджер зв'яжеться з вами найближчим часом, щоб надати актуальну інформацію щодо цін, розкладу та відповісти на всі питання.",
-                chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=None
+                "⏳ Ваш повторний запит надіслано адміністратору! Очікуйте підтвердження.", 
+                chat_id=call.message.chat.id, 
+                message_id=call.message.message_id
             )
-        except Exception as e:
-            print(f"Помилка відправки ліда: {e}")
-
-    elif data == 'reapply_access':
-        supabase.table('users').update({'access_status': 'pending'}).eq('telegram_id', user_id).execute()
-        try: bot.edit_message_text("⏳ Ваш повторний запит надіслано адміністратору! Очікуйте підтвердження.", chat_id=chat_id, message_id=message_id)
         except: pass
         
         last_name = call.from_user.last_name or ""
@@ -324,43 +390,21 @@ def global_callback_router(call):
         username = call.from_user.username
         mention = f"@{username}" if username else "Не вказано"
         lang = getattr(call.from_user, 'language_code', "Невідомо")
+        
         notification_text = (
             f"🔔 <b>Повторна заявка на доступ!</b>\n\n"
             f"👤 <b>Ім'я:</b> {full_name}\n"
             f"🔗 <b>Юзернейм:</b> {mention}\n"
             f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
-            f"🌐 <b>Мова:</b> {lang}\n\n👉 Зайдіть на сайт платформи, щоб надати доступ."
+            f"🌐 <b>Мова:</b> {lang}\n\n"
+            f"👉 Зайдіть на сайт платформи, щоб надати доступ."
         )
         for admin_id in ADMIN_IDS:
             try: bot.send_message(admin_id, notification_text, parse_mode="HTML")
             except: pass
-
-    elif data.startswith('approve_') or data.startswith('reject_'):
-        if user_id not in ADMIN_IDS: return
-        action, target_user_id = data.split('_')
-        target_user_id = int(target_user_id)
-        if action == 'approve':
-            supabase.table('users').update({'access_status': 'approved', 'needs_course_assignment': True}).eq('telegram_id', target_user_id).execute()
-            bot.edit_message_text(text=f"🔔 Запит від ID <code>{target_user_id}</code>\n\n✅ Рішення: <b>СХВАЛЕНО</b>", chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=None)
-            try:
-                bot.send_message(target_user_id, "🎉 <b>Вашу заявку схвалено!</b>\n\nТепер ви маєте повний доступ до платформи.", reply_markup=get_main_menu(True), parse_mode="HTML")
-            except: pass
-        elif action == 'reject':
-            supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
-            bot.edit_message_text(text=f"🔔 Запит від ID <code>{target_user_id}</code>\n\n❌ Рішення: <b>ВІДХИЛЕНО</b>", chat_id=chat_id, message_id=message_id, parse_mode="HTML", reply_markup=None)
-            try: bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
-            except: pass
-
-    elif data.startswith('revoke_'):
-        if user_id not in ADMIN_IDS: return
-        target_id = int(data.split('_')[1])
-        supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_id).execute()
-        markup = call.message.reply_markup
-        new_keyboard = [row for row in markup.keyboard if row[0].callback_data != data]
-        new_markup = types.InlineKeyboardMarkup()
-        for row in new_keyboard: new_markup.add(*row)
-        bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=new_markup)
-        bot.send_message(target_id, "❌ Адміністратор скасував ваш доступ до платформи.")
+                
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Виникла помилка під час обробки: {e}")
 
 @bot.message_handler(commands=['add'])
 def manual_add_user(message):
@@ -381,13 +425,46 @@ def manual_add_user(message):
         else:
             supabase.table('users').insert({'telegram_id': target_id, 'first_name': name, 'access_status': 'approved', 'needs_course_assignment': True}).execute()
             
-        bot.reply_to(message, f"✅ Учня <code>{target_id}</code> успішно додано!", parse_mode="HTML")
+        bot.reply_to(message, f"✅ Учня <code>{target_id}</code> успішно додано! На сайті з'явиться нагадування про вибір курсу.", parse_mode="HTML")
         try:
-            bot.send_message(target_id, "🎉 <b>Адміністратор надав вам доступ!</b>\n\nТепер ви можете користуватися платформою.", reply_markup=get_main_menu(True), parse_mode="HTML")
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
+            bot.send_message(target_id, "🎉 <b>Адміністратор надав вам доступ!</b>\n\nТепер ви можете користуватися платформою.", reply_markup=markup, parse_mode="HTML")
         except:
             pass
     except Exception as e:
         bot.reply_to(message, f"❌ Помилка: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('approve_') or call.data.startswith('reject_'))
+def handle_access_decision(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+
+    if call.from_user.id not in ADMIN_IDS:
+        bot.send_message(call.message.chat.id, "❌ У вас немає прав!")
+        return
+        
+    try:
+        action, target_user_id = call.data.split('_')
+        target_user_id = int(target_user_id)
+
+        if action == 'approve':
+            supabase.table('users').update({'access_status': 'approved', 'needs_course_assignment': True}).eq('telegram_id', target_user_id).execute()
+            bot.edit_message_text(text=f"🔔 Запит від ID <code>{target_user_id}</code>\n\n✅ Рішення: <b>СХВАЛЕНО</b>\n(На сайті з'явиться нагадування про курси)", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=None)
+            try:
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("🚀 Відкрити платформу", web_app=types.WebAppInfo(url="https://hackademia-web.vercel.app")))
+                bot.send_message(target_user_id, "🎉 <b>Вашу заявку схвалено!</b>\n\nТепер ви маєте повний доступ до платформи.", reply_markup=markup, parse_mode="HTML")
+            except: pass
+                
+        elif action == 'reject':
+            supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_user_id).execute()
+            bot.edit_message_text(text=f"🔔 Запит від ID <code>{target_user_id}</code>\n\n❌ Рішення: <b>ВІДХИЛЕНО</b>", chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=None)
+            try: 
+                bot.send_message(target_user_id, "❌ Адміністратор відхилив вашу заявку на доступ.")
+            except: pass
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Помилка: {e}")
 
 @bot.message_handler(commands=['users'])
 def manage_users(message):
@@ -405,6 +482,30 @@ def manage_users(message):
         if uid not in ADMIN_IDS:
             markup.add(types.InlineKeyboardButton(f"❌ Забрати доступ: {name}", callback_data=f"revoke_{uid}"))
     bot.send_message(message.chat.id, "👥 <b>Схвалені користувачі:</b>", reply_markup=markup, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('revoke_'))
+def handle_revoke(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
+
+    if call.from_user.id not in ADMIN_IDS:
+        bot.send_message(call.message.chat.id, "❌ Немає прав!")
+        return
+        
+    try:
+        target_id = int(call.data.split('_')[1])
+        supabase.table('users').update({'access_status': 'rejected'}).eq('telegram_id', target_id).execute()
+        
+        markup = call.message.reply_markup
+        new_keyboard = [row for row in markup.keyboard if row[0].callback_data != call.data]
+        new_markup = types.InlineKeyboardMarkup()
+        for row in new_keyboard:
+            new_markup.add(*row)
+            
+        bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=new_markup)
+        bot.send_message(target_id, "❌ Адміністратор скасував ваш доступ до платформи.")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Помилка: {e}")
 
 @bot.message_handler(commands=['backup'])
 def handle_database_backup(message):
@@ -426,7 +527,7 @@ def handle_photo(message):
         bot.reply_to(message, f"✅ Картинку оброблено!\n\n<b>Пряме посилання:</b>\n<code>{direct_url}</code>", parse_mode="HTML")
     except: pass
 
-# ОБРОБКА ВІДПОВІДЕЙ АДМІНА ЧЕРЕЗ БОТА (З ДУБЛЮВАННЯМ НА EMAIL)
+# ОБРОБКА ВІДПОВІДЕЙ АДМІНА ЧЕРЕЗ БОТА
 @bot.message_handler(func=lambda message: message.reply_to_message is not None and message.from_user.id in ADMIN_IDS, content_types=['text', 'photo', 'document', 'audio', 'voice', 'video'])
 def handle_admin_reply(message):
     original_text = message.reply_to_message.text or message.reply_to_message.caption
@@ -437,6 +538,7 @@ def handle_admin_reply(message):
             if user_id_match:
                 target_id = user_id_match.group(1).strip()
                 
+                # СЦЕНАРІЙ 1: TELEGRAM ID
                 if target_id.isdigit():
                     target_user_id = int(target_id)
                     if message.content_type == 'text':
@@ -446,6 +548,7 @@ def handle_admin_reply(message):
                         bot.copy_message(target_user_id, message.chat.id, message.message_id)
                     bot.reply_to(message, "✅ Відповідь успішно надіслана учню в Telegram!")
                     
+                # СЦЕНАРІЙ 2: ID З САЙТУ (Живий чат + Email)
                 else:
                     if message.content_type != 'text':
                         bot.reply_to(message, "❌ Для користувачів на сайті наразі підтримується тільки текстова відповідь.")
@@ -458,6 +561,7 @@ def handle_admin_reply(message):
                         
                     admin_uuid = admin_resp.data[0]['id']
                     
+                    # 1. Записуємо в БД (Сайт миттєво підтягне це в живий чат)
                     supabase.table('messages').insert({
                         'user_id': target_id,
                         'sender_id': admin_uuid,
@@ -465,6 +569,7 @@ def handle_admin_reply(message):
                         'is_read': False
                     }).execute()
                     
+                    # 2. Дублюємо на Email
                     user_resp = supabase.table('users').select('email', 'first_name').eq('id', target_id).execute()
                     if user_resp.data and user_resp.data[0].get('email'):
                         user_email = user_resp.data[0]['email']
@@ -512,7 +617,7 @@ def handle_all_other_messages(message):
             f"📩 <b>НОВЕ ПОВІДОМЛЕННЯ ВІД УЧНЯ (ЧЕРЕЗ БОТА)</b>\n\n"
             f"👤 <b>Учень:</b> {full_name}\n"
             f"🔗 <b>Юзернейм:</b> {username}\n"
-            f"🆔 ID: <code>{user_id}</code>\n\n"
+            f"🆔 ID: {user_id}\n\n"
             f"💬 <b>Текст:</b>\n{text}\n\n"
             f"💬 <i>Щоб відповісти клієнту прямо тут, зробіть Reply (Відповісти) на це повідомлення.</i>"
         )
@@ -526,6 +631,12 @@ def handle_all_other_messages(message):
                 pass
         
         bot.reply_to(message, "✅ Ваше повідомлення успішно надіслано в службу підтримки. Менеджер незабаром вам відповість!")
+
+# Універсальний обробник
+@bot.callback_query_handler(func=lambda call: True)
+def catch_all_callbacks(call):
+    try: bot.answer_callback_query(call.id)
+    except: pass
 
 if __name__ == '__main__':
     keep_alive()
