@@ -494,8 +494,8 @@ def handle_admin_reply(message):
         return
 
     try:
-        # ОНОВЛЕНИЙ РЕГЕКС: бере і цифри (Telegram), і букви (UUID Google)
-        user_id_match = re.search(r'ID:\s*([a-zA-Z0-9\-]+)', original_text)
+        # Регекс: бере і цифри (Telegram), і букви (UUID Google)
+        user_id_match = re.search(r'([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|\d{7,15})', original_text)
         if not user_id_match:
             bot.reply_to(message, "❌ Не зміг розпізнати ID учня в цій заявці.")
             return
@@ -517,13 +517,11 @@ def handle_admin_reply(message):
                     bot.copy_message(target_user_id, message.chat.id, message.message_id)
                 telegram_sent = True
             except Exception as e:
-                # Якщо це не з сайту, і ми не змогли відправити - видаємо помилку. 
-                # Якщо з сайту - ігноруємо Telegram-помилку, бо зараз відправимо у віджет.
                 if not is_from_website:
                     bot.reply_to(message, "❌ Користувач ще не натискав /start у боті. Telegram забороняє писати йому першим.")
                     return
         
-        # 2. Якщо це заявка з сайту — ЗАВЖДИ дублюємо у віджет (Supabase) та на Email
+        # 2. Якщо це заявка з сайту — ЗАВЖДИ дублюємо у віджет (Supabase) БЕЗ Email
         if is_from_website:
             if message.content_type != 'text':
                 bot.reply_to(message, "⚠️ Для користувачів на сайті підтримується тільки текстова відповідь.")
@@ -535,16 +533,14 @@ def handle_admin_reply(message):
                 return
             admin_uuid = admin_resp.data[0]['id']
             
-            # Шукаємо учня в базі за Telegram ID або UUID
+            # Шукаємо учня в базі
             if target_id.isdigit():
-                user_resp = supabase.table('users').select('id', 'email', 'first_name').eq('telegram_id', int(target_id)).execute()
+                user_resp = supabase.table('users').select('id').eq('telegram_id', int(target_id)).execute()
             else:
-                user_resp = supabase.table('users').select('id', 'email', 'first_name').eq('id', target_id).execute()
+                user_resp = supabase.table('users').select('id').eq('id', target_id).execute()
 
             if user_resp.data:
                 real_user_uuid = user_resp.data[0]['id']
-                user_email = user_resp.data[0].get('email')
-                user_name = user_resp.data[0].get('first_name', 'Студент')
                 
                 # Відправляємо у віджет на сайт
                 supabase.table('messages').insert({
@@ -554,23 +550,7 @@ def handle_admin_reply(message):
                     'is_read': False
                 }).execute()
                 
-                # Відправляємо на Email
-                if user_email:
-                    try:
-                        msg = MIMEText(f"Привіт, {user_name}!\n\nМенеджер Hackademia щойно відповів на ваше запитання:\n\n\"{message.text}\"\n\nВи можете продовжити спілкування прямо на сайті у віджеті підтримки.")
-                        msg['Subject'] = 'Відповідь від підтримки Hackademia'
-                        msg['From'] = GMAIL_ACCOUNT
-                        msg['To'] = user_email
-                        
-                        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-                        server.login(GMAIL_ACCOUNT, GMAIL_PASSWORD)
-                        server.send_message(msg)
-                        server.quit()
-                        bot.reply_to(message, f"✅ Відповідь надіслана у віджет на сайті та продубльована на email: {user_email}")
-                    except Exception as e:
-                        bot.reply_to(message, f"✅ Відповідь з'явилася у віджеті на сайті. (Але помилка надсилання Email: {e})")
-                else:
-                    bot.reply_to(message, "✅ Відповідь доставлена у віджет на сайті! (Email не вказано)")
+                bot.reply_to(message, "✅ Відповідь успішно доставлена клієнту у віджет на сайті!")
             else:
                 bot.reply_to(message, "❌ Користувача не знайдено в базі сайту.")
         else:
